@@ -49,6 +49,13 @@ export default function GameLobbyPage() {
     // Cargar info del juego
     loadGame();
 
+    // Unirse al room del juego (necesario para recibir eventos en tiempo real)
+    socket.emit('game:join', { gameCode, nickname: '' }, (response: any) => {
+      if (!response.success) {
+        console.error('Error joining game room:', response.message);
+      }
+    });
+
     // Escuchar eventos
     socket.on('game:player-joined', (data) => {
       setPlayers(data.players);

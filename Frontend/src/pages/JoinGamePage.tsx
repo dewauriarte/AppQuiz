@@ -35,27 +35,27 @@ export default function JoinGamePage() {
 
     const socket = initializeSocket(accessToken);
 
-    // Escuchar respuesta
-    socket.once('game:joined', () => {
-      toast.success('¡Unido al juego!', { icon: '🎮' });
-      navigate(`/game/lobby/${gameCode}`);
-      setJoining(false);
-    });
-
-    socket.once('game:join-error', (message) => {
-      toast.error(message);
-      setJoining(false);
-    });
-
-    // Emitir evento de unirse
+    // Emitir evento de unirse con callback
     socket.emit('game:join', {
       gameCode: gameCode.toUpperCase().trim(),
       nickname: nickname.trim() || user?.displayName || user?.username,
+    }, (response: any) => {
+      setJoining(false);
+
+      if (response.success) {
+        toast.success('¡Unido al juego!', { icon: '🎮' });
+        navigate(`/game/lobby/${gameCode.toUpperCase().trim()}`);
+      } else {
+        toast.error(response.message || 'Error al unirse al juego');
+      }
     });
 
     // Timeout de seguridad
     setTimeout(() => {
-      setJoining(false);
+      if (joining) {
+        setJoining(false);
+        toast.error('Tiempo de espera agotado');
+      }
     }, 10000);
   };
 

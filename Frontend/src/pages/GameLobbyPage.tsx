@@ -4,6 +4,7 @@ import { motion } from 'framer-motion';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { 
   Copy, 
   Play, 
@@ -37,6 +38,7 @@ export default function GameLobbyPage() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
+  const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
 
   useEffect(() => {
     if (!gameCode || !accessToken) return;
@@ -121,11 +123,10 @@ export default function GameLobbyPage() {
   };
 
   const cancelGame = async () => {
-    if (!confirm('¿Estás seguro de cancelar el juego?')) return;
-
     try {
       await api.delete(`/games/${game.game_id}`);
       toast.success('Juego cancelado');
+      setIsCancelDialogOpen(false);
       navigate('/dashboard');
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Error al cancelar');
@@ -288,7 +289,7 @@ export default function GameLobbyPage() {
                 )}
 
                 <Button
-                  onClick={cancelGame}
+                  onClick={() => setIsCancelDialogOpen(true)}
                   variant="outline"
                   className="w-full border-red-500 text-red-400 hover:bg-red-500 hover:text-white"
                 >
@@ -320,6 +321,33 @@ export default function GameLobbyPage() {
           </motion.div>
         </div>
       </div>
+
+      {/* Diálogo de confirmación para cancelar juego */}
+      <AlertDialog open={isCancelDialogOpen} onOpenChange={setIsCancelDialogOpen}>
+        <AlertDialogContent className="bg-slate-900 border-2 border-red-500/50 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-gaming text-2xl text-red-400 flex items-center gap-2">
+              <X className="w-6 h-6" />
+              CANCELAR JUEGO
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-purple-200">
+              ¿Estás seguro de cancelar el juego? Todos los jugadores serán desconectados y el código dejará de funcionar.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-slate-600 text-slate-300 hover:bg-slate-800">
+              No, Volver
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={cancelGame}
+              className="bg-gradient-to-r from-red-600 to-rose-600 hover:from-rose-600 hover:to-red-600"
+            >
+              <X className="mr-2 h-4 w-4" />
+              Sí, Cancelar Juego
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -22,7 +22,7 @@ export default function TeacherDashboard() {
       onClick: () => navigate('/ai-generator'),
     },
     {
-      title: 'Crear Quiz',
+      title: 'Quizzes',
       description: 'Forja un nuevo desafío',
       icon: BookOpen,
       gradient: 'from-blue-500 to-blue-600',

@@ -6,9 +6,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
-import { 
-  ArrowLeft, 
-  Edit, 
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import {
+  ArrowLeft,
+  Edit,
   Trash2,
   Loader2,
   Users,
@@ -59,6 +60,9 @@ export default function ClassListDetailPage() {
   const [studentUsername, setStudentUsername] = useState('');
   const [studentNickname, setStudentNickname] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [isRemoveDialogOpen, setIsRemoveDialogOpen] = useState(false);
+  const [studentToRemove, setStudentToRemove] = useState<{ id: number; name: string } | null>(null);
 
   useEffect(() => {
     loadClassList();
@@ -86,10 +90,10 @@ export default function ClassListDetailPage() {
 
     try {
       setIsAdding(true);
-      
+
       // Primero buscar el estudiante por username
       const { data: searchResult } = await api.get(`/auth/search-user?username=${studentUsername}`);
-      
+
       if (!searchResult.data) {
         toast.error('Usuario no encontrado');
         return;
@@ -120,12 +124,14 @@ export default function ClassListDetailPage() {
     }
   };
 
-  const handleRemoveStudent = async (studentId: number, studentName: string) => {
-    if (!confirm(`¿Estás seguro de remover a ${studentName} de esta lista?`)) return;
+  const handleRemoveStudent = async () => {
+    if (!studentToRemove) return;
 
     try {
-      await api.delete(`/lists/${id}/students/${studentId}`);
+      await api.delete(`/lists/${id}/students/${studentToRemove.id}`);
       toast.success('Estudiante removido exitosamente');
+      setIsRemoveDialogOpen(false);
+      setStudentToRemove(null);
       loadClassList();
     } catch (error: any) {
       console.error('Error removing student:', error);
@@ -133,12 +139,16 @@ export default function ClassListDetailPage() {
     }
   };
 
-  const handleDelete = async () => {
-    if (!confirm('¿Estás seguro de eliminar esta lista? Se eliminarán todos los estudiantes asociados.')) return;
+  const openRemoveDialog = (studentId: number, studentName: string) => {
+    setStudentToRemove({ id: studentId, name: studentName });
+    setIsRemoveDialogOpen(true);
+  };
 
+  const handleDelete = async () => {
     try {
       await api.delete(`/lists/${id}`);
       toast.success('Lista eliminada exitosamente');
+      setIsDeleteDialogOpen(false);
       navigate('/lists');
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Error al eliminar la lista');
@@ -176,15 +186,15 @@ export default function ClassListDetailPage() {
           animate={{ opacity: 1, y: 0 }}
           className="mb-6"
         >
-          <Button 
-            variant="outline" 
-            onClick={() => navigate('/lists')} 
+          <Button
+            variant="outline"
+            onClick={() => navigate('/lists')}
             className="mb-4 border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white"
           >
             <ArrowLeft className="mr-2 h-4 w-4" />
             Volver
           </Button>
-          
+
           <div className="game-card bg-gradient-to-br from-indigo-900 to-purple-900 rounded-xl p-6 border-2 border-indigo-500 shadow-2xl">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-4">
@@ -282,7 +292,7 @@ export default function ClassListDetailPage() {
                   Editar
                 </Button>
                 <Button
-                  onClick={handleDelete}
+                  onClick={() => setIsDeleteDialogOpen(true)}
                   className="bg-gradient-to-r from-red-600 to-rose-600 hover:from-rose-600 hover:to-red-600"
                 >
                   <Trash2 className="mr-2 h-4 w-4" />
@@ -368,7 +378,7 @@ export default function ClassListDetailPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleRemoveStudent(student.user_id, student.student.display_name || student.student.username)}
+                        onClick={() => openRemoveDialog(student.user_id, student.student.display_name || student.student.username)}
                         className="border-red-500 text-red-400 hover:bg-red-500 hover:text-white"
                       >
                         <UserMinus className="h-4 w-4" />
@@ -381,7 +391,60 @@ export default function ClassListDetailPage() {
           </Card>
         </motion.div>
       </div>
+
+      {/* Diálogo de confirmación para eliminar lista */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent className="bg-slate-900 border-2 border-red-500/50 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-gaming text-2xl text-red-400 flex items-center gap-2">
+              <Trash2 className="w-6 h-6" />
+              ELIMINAR LISTA
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-purple-200">
+              ¿Estás seguro de eliminar esta lista? Se eliminarán todos los estudiantes asociados. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-slate-600 text-slate-300 hover:bg-slate-800">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-gradient-to-r from-red-600 to-rose-600 hover:from-rose-600 hover:to-red-600"
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Eliminar Lista
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Diálogo de confirmación para remover estudiante */}
+      <AlertDialog open={isRemoveDialogOpen} onOpenChange={setIsRemoveDialogOpen}>
+        <AlertDialogContent className="bg-slate-900 border-2 border-red-500/50 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-gaming text-2xl text-red-400 flex items-center gap-2">
+              <UserMinus className="w-6 h-6" />
+              REMOVER ESTUDIANTE
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-purple-200">
+              ¿Estás seguro de remover a <strong className="text-white">{studentToRemove?.name}</strong> de esta lista?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-slate-600 text-slate-300 hover:bg-slate-800">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleRemoveStudent}
+              className="bg-gradient-to-r from-red-600 to-rose-600 hover:from-rose-600 hover:to-red-600"
+            >
+              <UserMinus className="mr-2 h-4 w-4" />
+              Remover Estudiante
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
-

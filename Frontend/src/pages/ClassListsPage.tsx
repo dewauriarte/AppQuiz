@@ -5,6 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { 
   Users, 
   Plus, 
@@ -43,6 +44,8 @@ export default function ClassListsPage() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [listToDelete, setListToDelete] = useState<{ id: number; name: string } | null>(null);
 
   const loadClassLists = async () => {
     try {
@@ -73,16 +76,23 @@ export default function ClassListsPage() {
     loadClassLists();
   };
 
-  const handleDelete = async (listId: number) => {
-    if (!confirm('¿Estás seguro de eliminar esta lista? Se eliminarán todos los estudiantes asociados.')) return;
+  const handleDelete = async () => {
+    if (!listToDelete) return;
 
     try {
-      await api.delete(`/lists/${listId}`);
+      await api.delete(`/lists/${listToDelete.id}`);
       toast.success('Lista eliminada exitosamente');
+      setIsDeleteDialogOpen(false);
+      setListToDelete(null);
       loadClassLists();
     } catch (error: any) {
       toast.error(error.response?.data?.message || 'Error al eliminar la lista');
     }
+  };
+
+  const openDeleteDialog = (listId: number, listName: string) => {
+    setListToDelete({ id: listId, name: listName });
+    setIsDeleteDialogOpen(true);
   };
 
   return (
@@ -256,7 +266,7 @@ export default function ClassListsPage() {
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleDelete(list.list_id)}
+                        onClick={() => openDeleteDialog(list.list_id, list.name)}
                         className="border-red-500 text-red-400 hover:bg-red-500 hover:text-white"
                       >
                         <Trash2 className="h-3 w-3" />
@@ -299,6 +309,33 @@ export default function ClassListsPage() {
           </motion.div>
         )}
       </div>
+
+      {/* Diálogo de confirmación para eliminar lista */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent className="bg-slate-900 border-2 border-red-500/50 text-white">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="font-gaming text-2xl text-red-400 flex items-center gap-2">
+              <Trash2 className="w-6 h-6" />
+              ELIMINAR LISTA
+            </AlertDialogTitle>
+            <AlertDialogDescription className="text-purple-200">
+              ¿Estás seguro de eliminar la lista <strong className="text-white">"{listToDelete?.name}"</strong>? Se eliminarán todos los estudiantes asociados. Esta acción no se puede deshacer.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="border-slate-600 text-slate-300 hover:bg-slate-800">
+              Cancelar
+            </AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              className="bg-gradient-to-r from-red-600 to-rose-600 hover:from-rose-600 hover:to-red-600"
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Eliminar Lista
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

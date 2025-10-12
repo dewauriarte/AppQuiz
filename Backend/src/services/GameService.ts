@@ -83,6 +83,17 @@ export class GameService {
             display_name: true,
           },
         },
+        game_players: {
+          include: {
+            users: {
+              select: {
+                user_id: true,
+                username: true,
+                display_name: true,
+              },
+            },
+          },
+        },
         _count: {
           select: { game_players: true },
         },
@@ -91,6 +102,23 @@ export class GameService {
 
     if (!game) {
       throw new NotFoundError('Juego no encontrado');
+    }
+
+    // Si el juego está en estado 'starting' pero no hay actividad reciente, resetear a lobby
+    if (game.status === GameStatus.starting && game.started_at) {
+      const timeSinceStart = Date.now() - new Date(game.started_at).getTime();
+      // Si pasaron más de 30 segundos desde que empezó el countdown, resetear
+      if (timeSinceStart > 30000) {
+        await prisma.games.update({
+          where: { game_code: code },
+          data: {
+            status: GameStatus.lobby,
+            started_at: null,
+          },
+        });
+        game.status = GameStatus.lobby;
+        game.started_at = null;
+      }
     }
 
     return game;
@@ -188,9 +216,9 @@ export class GameService {
       throw new UnauthorizedError('No tienes permiso para eliminar este juego');
     }
 
-    // Solo se puede eliminar si está en lobby
-    if (game.status !== GameStatus.lobby) {
-      throw new BadRequestError('Solo se pueden eliminar juegos en lobby');
+    // Se puede eliminar si está en lobby o starting (antes de que empiece realmente)
+    if (game.status !== GameStatus.lobby && game.status !== GameStatus.starting) {
+      throw new BadRequestError('Solo se pueden eliminar juegos que no han iniciado');
     }
 
     await prisma.games.delete({

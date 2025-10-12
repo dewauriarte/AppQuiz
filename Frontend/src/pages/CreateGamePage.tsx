@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,6 +20,7 @@ interface QuestionSet {
 
 export default function CreateGamePage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [quizzes, setQuizzes] = useState<QuestionSet[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
@@ -33,6 +34,14 @@ export default function CreateGamePage() {
   useEffect(() => {
     loadQuizzes();
   }, []);
+
+  useEffect(() => {
+    // Preseleccionar quiz si viene en la URL
+    const setIdFromUrl = searchParams.get('setId');
+    if (setIdFromUrl) {
+      setSelectedQuiz(setIdFromUrl);
+    }
+  }, [searchParams]);
 
   const loadQuizzes = async () => {
     try {

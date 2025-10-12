@@ -18,6 +18,7 @@ import ClassListEditPage from '@/pages/ClassListEditPage';
 import CreateGamePage from '@/pages/CreateGamePage';
 import GameLobbyPage from '@/pages/GameLobbyPage';
 import JoinGamePage from '@/pages/JoinGamePage';
+import GamePlayPage from '@/pages/GamePlayPage';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
 function App() {
@@ -148,6 +149,14 @@ function App() {
         element={
           <ProtectedRoute>
             <GameLobbyPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/game/play/:gameCode"
+        element={
+          <ProtectedRoute>
+            <GamePlayPage />
           </ProtectedRoute>
         }
       />

@@ -26,7 +26,8 @@ import {
   Copy,
   Loader2,
   Sparkles,
-  ArrowLeft
+  ArrowLeft,
+  Gamepad2
 } from 'lucide-react';
 import Topbar from '@/components/layout/Topbar';
 import { api } from '@/lib/api';
@@ -331,43 +332,53 @@ export default function QuestionSetsPage() {
                       {set.grade_level && <p>🎓 {set.grade_level}</p>}
                       <p>👤 {set.users.display_name || set.users.username}</p>
                     </div>
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-2">
                       <Button
                         size="sm"
-                        variant="outline"
-                        onClick={() => navigate(`/question-sets/${set.set_id}`)}
-                        className="border-blue-500 text-blue-400 hover:bg-blue-500 hover:text-white"
+                        onClick={() => navigate(`/games/create?setId=${set.set_id}`)}
+                        className="w-full bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-indigo-600 hover:to-purple-600"
                       >
-                        <Eye className="mr-1 h-3 w-3" />
-                        Ver
+                        <Gamepad2 className="mr-1 h-4 w-4" />
+                        Iniciar Juego
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => navigate(`/question-sets/${set.set_id}/edit`)}
-                        className="border-yellow-500 text-yellow-400 hover:bg-yellow-500 hover:text-white"
-                      >
-                        <Edit className="mr-1 h-3 w-3" />
-                        Editar
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDuplicate(set.set_id)}
-                        className="border-green-500 text-green-400 hover:bg-green-500 hover:text-white"
-                      >
-                        <Copy className="mr-1 h-3 w-3" />
-                        Copiar
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleDeleteClick(set.set_id)}
-                        className="border-red-500 text-red-400 hover:bg-red-500 hover:text-white"
-                      >
-                        <Trash2 className="mr-1 h-3 w-3" />
-                        Borrar
-                      </Button>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate(`/question-sets/${set.set_id}`)}
+                          className="border-blue-500 text-blue-400 hover:bg-blue-500 hover:text-white"
+                        >
+                          <Eye className="mr-1 h-3 w-3" />
+                          Ver
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate(`/question-sets/${set.set_id}/edit`)}
+                          className="border-yellow-500 text-yellow-400 hover:bg-yellow-500 hover:text-white"
+                        >
+                          <Edit className="mr-1 h-3 w-3" />
+                          Editar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDuplicate(set.set_id)}
+                          className="border-green-500 text-green-400 hover:bg-green-500 hover:text-white"
+                        >
+                          <Copy className="mr-1 h-3 w-3" />
+                          Copiar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleDeleteClick(set.set_id)}
+                          className="border-red-500 text-red-400 hover:bg-red-500 hover:text-white"
+                        >
+                          <Trash2 className="mr-1 h-3 w-3" />
+                          Borrar
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>

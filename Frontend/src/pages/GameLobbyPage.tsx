@@ -15,6 +15,7 @@ import {
   Loader2 
 } from 'lucide-react';
 import Topbar from '@/components/layout/Topbar';
+import CountdownOverlay from '@/components/game/CountdownOverlay';
 import { api } from '@/lib/api';
 import { initializeSocket, getSocket } from '@/lib/socket';
 import { useAuthStore } from '@/store/authStore';
@@ -32,70 +33,102 @@ interface Player {
 export default function GameLobbyPage() {
   const { gameCode } = useParams<{ gameCode: string }>();
   const navigate = useNavigate();
-  const { accessToken } = useAuthStore();
-  
+  const { accessToken, user } = useAuthStore();
+
   const [game, setGame] = useState<any>(null);
   const [players, setPlayers] = useState<Player[]>([]);
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
+  const [countdown, setCountdown] = useState<number | string | null>(null);
 
   useEffect(() => {
     if (!gameCode || !accessToken) return;
 
-    // Inicializar Socket.IO
-    const socket = initializeSocket(accessToken);
+    let mounted = true;
 
-    // Cargar info del juego
-    loadGame();
+    const setupGame = async () => {
+      // Inicializar Socket.IO
+      const socket = initializeSocket(accessToken);
 
-    // Unirse al room del juego (necesario para recibir eventos en tiempo real)
-    socket.emit('game:join', { gameCode, nickname: '' }, (response: any) => {
-      if (!response.success) {
-        console.error('Error joining game room:', response.message);
-      }
-    });
+      // Cargar info del juego primero
+      await loadGame();
 
-    // Escuchar eventos
-    socket.on('game:player-joined', (data) => {
-      setPlayers(data.players);
-      toast.success(`${data.player.username} se unió al juego`, {
-        icon: '👋',
-        duration: 2000,
+      if (!mounted) return;
+
+      // Unirse al room del juego (necesario para recibir eventos en tiempo real)
+      socket.emit('game:join-room', { gameCode }, (response: any) => {
+        if (!mounted) return;
+
+        if (response.success) {
+          setPlayers(response.players || []);
+        } else {
+          console.error('Error joining game room:', response.message);
+          toast.error(response.message);
+        }
       });
-    });
 
-    socket.on('game:player-left', (data) => {
-      setPlayers((prev) => prev.filter(p => p.user_id !== data.userId));
-      toast(`${data.username} salió del juego`, {
-        icon: '👋',
-        duration: 2000,
+      // Escuchar eventos en tiempo real
+      socket.on('game:player-joined', (data) => {
+        setPlayers(data.players);
+        toast.success(`${data.player.username} se unió al juego`, {
+          icon: '👋',
+          duration: 2000,
+        });
       });
-    });
 
-    socket.on('game:player-ready', (data) => {
-      setPlayers((prev) =>
-        prev.map(p =>
-          p.user_id === data.userId ? { ...p, isReady: true } : p
-        )
-      );
-    });
+      socket.on('game:player-left', (data) => {
+        setPlayers((prev) => prev.filter(p => p.user_id !== data.userId));
+        toast(`${data.username} salió del juego`, {
+          icon: '👋',
+          duration: 2000,
+        });
+      });
 
-    socket.on('game:starting', () => {
-      setStarting(true);
-      toast.success('¡El juego va a comenzar!', { icon: '🎮' });
-    });
+      socket.on('game:player-ready', (data) => {
+        setPlayers((prev) =>
+          prev.map(p =>
+            p.user_id === data.userId ? { ...p, isReady: true } : p
+          )
+        );
+      });
+
+      socket.on('game:countdown', (data: { count: number | string }) => {
+        setCountdown(data.count);
+        setStarting(true);
+      });
 
     socket.on('game:started', () => {
+      setCountdown(null);
+      toast.success('¡Juego iniciado!', { icon: '🎮' });
       navigate(`/game/play/${gameCode}`);
     });
 
+      socket.on('game:cancelled', (data) => {
+        toast.error(data.message, { icon: '❌' });
+        navigate('/dashboard');
+      });
+
+      socket.on('game:player-disconnected', (data) => {
+        toast(`${data.username} se desconectó`, { icon: '⚠️' });
+        setPlayers((prev) => prev.filter(p => p.user_id !== data.userId));
+      });
+    };
+
+    setupGame();
+
     return () => {
-      socket.off('game:player-joined');
-      socket.off('game:player-left');
-      socket.off('game:player-ready');
-      socket.off('game:starting');
-      socket.off('game:started');
+      mounted = false;
+      const socket = getSocket();
+      if (socket) {
+        socket.off('game:player-joined');
+        socket.off('game:player-left');
+        socket.off('game:player-ready');
+        socket.off('game:countdown');
+        socket.off('game:started');
+        socket.off('game:cancelled');
+        socket.off('game:player-disconnected');
+      }
     };
   }, [gameCode, accessToken]);
 
@@ -103,7 +136,7 @@ export default function GameLobbyPage() {
     try {
       const { data } = await api.get(`/games/code/${gameCode}`);
       setGame(data.data);
-      setPlayers(data.data.game_players || []);
+      // NO sobrescribir players aquí - se actualizará desde el socket
     } catch (error) {
       console.error('Error loading game:', error);
       toast.error('Error al cargar el juego');
@@ -140,6 +173,21 @@ export default function GameLobbyPage() {
     }
   };
 
+  const handleReadyToggle = () => {
+    const socket = getSocket();
+    if (!socket) return;
+
+    socket.emit('game:ready', { gameCode }, (response: any) => {
+      if (response.success) {
+        toast.success(isPlayerReady ? 'Marcado como no listo' : '¡Listo para jugar!', {
+          icon: isPlayerReady ? '⏸️' : '✅'
+        });
+      } else {
+        toast.error(response.message || 'Error al cambiar estado');
+      }
+    });
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
@@ -150,6 +198,10 @@ export default function GameLobbyPage() {
 
   const readyCount = players.filter(p => p.isReady).length;
   const canStart = players.length >= 2;
+  const isTeacher = game?.teacher_id === user?.id;
+  const currentPlayer = players.find(p => p.user_id === user?.id);
+  const isPlayer = !!currentPlayer;
+  const isPlayerReady = currentPlayer?.isReady || false;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
@@ -248,10 +300,15 @@ export default function GameLobbyPage() {
                             )}
                           </div>
                         </div>
-                        {player.isReady && (
+                        {player.isReady ? (
                           <Badge className="bg-green-600">
                             <CheckCircle className="w-3 h-3 mr-1" />
                             Listo
+                          </Badge>
+                        ) : (
+                          <Badge className="bg-amber-600">
+                            <Clock className="w-3 h-3 mr-1" />
+                            Esperando
                           </Badge>
                         )}
                       </motion.div>
@@ -271,38 +328,76 @@ export default function GameLobbyPage() {
           >
             <Card className="bg-slate-800 border-2 border-green-500/30">
               <CardContent className="pt-6 space-y-4">
-                <Button
-                  onClick={startGame}
-                  disabled={!canStart || starting}
-                  className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-emerald-600 hover:to-green-600 h-14 text-lg"
-                >
-                  {starting ? (
-                    <>
-                      <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                      Iniciando...
-                    </>
-                  ) : (
-                    <>
-                      <Play className="mr-2 h-5 w-5" />
-                      ¡Iniciar Juego!
-                    </>
-                  )}
-                </Button>
+                {isTeacher ? (
+                  <>
+                    <Button
+                      onClick={startGame}
+                      disabled={!canStart || starting}
+                      className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-emerald-600 hover:to-green-600 h-14 text-lg"
+                    >
+                      {starting ? (
+                        <>
+                          <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                          Iniciando...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="mr-2 h-5 w-5" />
+                          ¡Iniciar Juego!
+                        </>
+                      )}
+                    </Button>
 
-                {!canStart && (
-                  <p className="text-xs text-center text-amber-400">
-                    Se necesitan al menos 2 jugadores
-                  </p>
+                    {!canStart && (
+                      <p className="text-xs text-center text-amber-400">
+                        Se necesitan al menos 2 jugadores
+                      </p>
+                    )}
+
+                    <Button
+                      onClick={() => setIsCancelDialogOpen(true)}
+                      variant="outline"
+                      className="w-full border-red-500 text-red-400 hover:bg-red-500 hover:text-white"
+                    >
+                      <X className="mr-2 h-4 w-4" />
+                      Cancelar Juego
+                    </Button>
+                  </>
+                ) : isPlayer ? (
+                  <>
+                    <Button
+                      onClick={handleReadyToggle}
+                      disabled={starting}
+                      className={`w-full h-14 text-lg ${
+                        isPlayerReady
+                          ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-orange-600 hover:to-amber-600'
+                          : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-emerald-600 hover:to-green-600'
+                      }`}
+                    >
+                      {isPlayerReady ? (
+                        <>
+                          <CheckCircle className="mr-2 h-5 w-5" />
+                          ¡Estoy Listo!
+                        </>
+                      ) : (
+                        <>
+                          <Clock className="mr-2 h-5 w-5" />
+                          Marcar como Listo
+                        </>
+                      )}
+                    </Button>
+
+                    <p className="text-xs text-center text-purple-300">
+                      {isPlayerReady
+                        ? '✅ Listo - Esperando que el profesor inicie...'
+                        : '⏳ Marca listo cuando estés preparado'}
+                    </p>
+                  </>
+                ) : (
+                  <div className="text-center py-4 text-gray-400">
+                    <p className="text-sm">Esperando que el profesor inicie...</p>
+                  </div>
                 )}
-
-                <Button
-                  onClick={() => setIsCancelDialogOpen(true)}
-                  variant="outline"
-                  className="w-full border-red-500 text-red-400 hover:bg-red-500 hover:text-white"
-                >
-                  <X className="mr-2 h-4 w-4" />
-                  Cancelar Juego
-                </Button>
               </CardContent>
             </Card>
 
@@ -328,6 +423,11 @@ export default function GameLobbyPage() {
           </motion.div>
         </div>
       </div>
+
+      {/* Countdown Overlay */}
+      {countdown !== null && (
+        <CountdownOverlay count={countdown} show={countdown !== null} />
+      )}
 
       {/* Diálogo de confirmación para cancelar juego */}
       <AlertDialog open={isCancelDialogOpen} onOpenChange={setIsCancelDialogOpen}>

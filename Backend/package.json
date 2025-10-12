@@ -43,6 +43,8 @@
     "openai": "^6.3.0",
     "pdf-parse": "^1.1.1",
     "qrcode.react": "^4.2.0",
+    "react-confetti": "^6.4.0",
+    "react-use": "^17.6.0",
     "redis": "^4.7.0",
     "sharp": "^0.33.5",
     "socket.io": "^4.8.1",

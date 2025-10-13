@@ -24,6 +24,31 @@ export class GameService {
       throw new BadRequestError('El quiz no tiene preguntas');
     }
 
+    // Verificar lista si se proporciona
+    let studentUserIds: number[] = [];
+    if (data.list_id) {
+      const classList = await prisma.class_lists.findUnique({
+        where: { list_id: data.list_id },
+        include: {
+          class_list_students: {
+            select: {
+              user_id: true,
+            },
+          },
+        },
+      });
+
+      if (!classList) {
+        throw new NotFoundError('Lista no encontrada');
+      }
+
+      if (classList.teacher_id !== teacherId) {
+        throw new UnauthorizedError('No tienes permiso para usar esta lista');
+      }
+
+      studentUserIds = classList.class_list_students.map((s) => s.user_id);
+    }
+
     // Generar código único
     const gameCode = await generateGameCode();
 
@@ -58,7 +83,12 @@ export class GameService {
       },
     });
 
-    return game;
+    // Si hay estudiantes en la lista, agregar metadata para notificaciones
+    // El socket handler se encargará de enviar las notificaciones
+    return {
+      ...game,
+      _invitedStudents: studentUserIds, // Metadata temporal para el controlador
+    };
   }
 
   async getByCode(code: string) {

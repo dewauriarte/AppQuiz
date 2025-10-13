@@ -3,6 +3,7 @@ import { asyncHandler } from '@/utils/asyncHandler';
 import GameService from '@/services/GameService';
 import { createGameSchema, updateGameStatusSchema } from '@/types/game.types';
 import { GameStatus } from '@prisma/client';
+import { getSocketIO, hasSocketIO } from '@/socket/socketInstance';
 
 export class GameController {
   create = asyncHandler(async (req: Request, res: Response): Promise<void> => {
@@ -11,11 +12,42 @@ export class GameController {
     }
 
     const validatedData = createGameSchema.parse(req.body);
-    const game = await GameService.create(req.userId, validatedData);
+    const game: any = await GameService.create(req.userId, validatedData);
+
+    // Enviar invitaciones si hay estudiantes en la lista
+    if (game._invitedStudents && game._invitedStudents.length > 0) {
+      console.log('[GameController] 📨 Enviando invitaciones a:', game._invitedStudents.length, 'estudiantes');
+      
+      if (!hasSocketIO()) {
+        console.error('[GameController] ❌ Socket.IO no disponible');
+      } else {
+        const io = getSocketIO();
+        const studentIds = game._invitedStudents;
+
+        // Enviar notificación a cada estudiante
+        studentIds.forEach((studentId: number) => {
+          console.log('[GameController] 📤 Enviando a user:', studentId, 'room:', `user:${studentId}`);
+          
+          io.to(`user:${studentId}`).emit('game:invitation', {
+            game_id: game.game_id,
+            game_code: game.game_code,
+            quiz_title: game.question_sets.title,
+            teacher_name: game.users.display_name || game.users.username,
+            game_mode: game.game_mode,
+            created_at: game.created_at,
+          });
+        });
+        
+        console.log('[GameController] ✅ Invitaciones enviadas exitosamente');
+      }
+    }
+
+    // Remover metadata temporal antes de enviar respuesta
+    const { _invitedStudents, ...gameData } = game;
 
     res.status(201).json({
       success: true,
-      data: game,
+      data: gameData,
       message: 'Juego creado exitosamente',
     });
   });

@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
 import { AudioSettings } from '@/components/game/AudioSettings';
 import { Gamepad2, LogOut, Settings, User } from 'lucide-react';
+import NotificationCenter from '@/components/notifications/NotificationCenter';
 
 export default function Topbar() {
   const navigate = useNavigate();
@@ -43,6 +44,9 @@ export default function Topbar() {
             <Badge className="hidden md:block bg-purple-600 text-white px-3 py-1">
               {user?.role === 'admin' ? 'Admin' : user?.role === 'teacher' ? 'Profesor' : 'Estudiante'}
             </Badge>
+
+            {/* Notification Center (Solo para estudiantes) */}
+            {user?.role === 'student' && <NotificationCenter />}
             
             {/* Profile */}
             <Sheet open={openProfile} onOpenChange={setOpenProfile}>

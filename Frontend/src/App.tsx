@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
+import { useSocketStore } from '@/store/socketStore';
 import LoginPage from '@/pages/LoginPage';
 import RegisterPage from '@/pages/RegisterPage';
 import DashboardPage from '@/pages/DashboardPage';
@@ -24,11 +25,26 @@ import LeaderboardPage from '@/pages/LeaderboardPage';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
 function App() {
-  const { checkAuth } = useAuthStore();
+  const { checkAuth, isAuthenticated, accessToken } = useAuthStore();
+  const { connect, disconnect } = useSocketStore();
 
   useEffect(() => {
     checkAuth();
   }, [checkAuth]);
+
+  // Conectar/Desconectar socket según autenticación
+  useEffect(() => {
+    if (isAuthenticated && accessToken) {
+      connect();
+    } else {
+      disconnect();
+    }
+
+    // Cleanup
+    return () => {
+      disconnect();
+    };
+  }, [isAuthenticated, accessToken, connect, disconnect]);
 
   return (
     <Routes>

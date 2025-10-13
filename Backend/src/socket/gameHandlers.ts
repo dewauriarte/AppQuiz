@@ -20,7 +20,16 @@ interface JoinGamePayload {
 export function registerGameHandlers(io: Server): void {
   io.on('connection', (socket: CustomSocket) => {
     const user = socket.user;
-    if (!user) return;
+    if (!user) {
+      console.log('[Socket] ❌ Conexión sin usuario autenticado');
+      return;
+    }
+
+    console.log('[Socket] ✅ Usuario conectado:', user.userId, '(', user.username, ')');
+
+    // Unir al socket a su room personal para recibir notificaciones
+    socket.join(`user:${user.userId}`);
+    console.log('[Socket] 📢 Usuario unido a room:', `user:${user.userId}`);
 
     /**
      * Unirse a un juego

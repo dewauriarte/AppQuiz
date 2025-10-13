@@ -5,6 +5,7 @@ import prisma from '@config/database';
 import redis, { closeRedis } from '@config/redis';
 import { initializeSocket } from '@config/socket';
 import { registerGameHandlers } from '@/socket/gameHandlers';
+import { setSocketIO } from '@/socket/socketInstance';
 
 const PORT = parseInt(env.PORT, 10) || 4000;
 
@@ -28,6 +29,7 @@ const startServer = async () => {
 
     // Initialize Socket.IO
     const io = initializeSocket(httpServer);
+    setSocketIO(io); // Set global instance
     registerGameHandlers(io);
     console.info('✅ Socket.IO initialized');
 

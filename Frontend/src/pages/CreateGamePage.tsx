@@ -18,21 +18,29 @@ interface QuestionSet {
   _count: { questions: number };
 }
 
+interface ClassList {
+  list_id: number;
+  name: string;
+  student_count: number;
+}
+
 export default function CreateGamePage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [quizzes, setQuizzes] = useState<QuestionSet[]>([]);
+  const [lists, setLists] = useState<ClassList[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
 
   const [selectedQuiz, setSelectedQuiz] = useState('');
+  const [selectedList, setSelectedList] = useState<string | undefined>(undefined);
   const [gameMode, setGameMode] = useState('classic');
   const [maxPlayers, setMaxPlayers] = useState('50');
   const [showLeaderboard, setShowLeaderboard] = useState(true);
   const [speedPoints, setSpeedPoints] = useState(true);
 
   useEffect(() => {
-    loadQuizzes();
+    loadData();
   }, []);
 
   useEffect(() => {
@@ -43,13 +51,19 @@ export default function CreateGamePage() {
     }
   }, [searchParams]);
 
-  const loadQuizzes = async () => {
+  const loadData = async () => {
     try {
-      const { data } = await api.get('/question-sets?limit=100');
-      setQuizzes(data.data || []);
+      // Cargar quizzes y listas en paralelo
+      const [quizzesRes, listsRes] = await Promise.all([
+        api.get('/question-sets?limit=100'),
+        api.get('/lists'),
+      ]);
+      
+      setQuizzes(quizzesRes.data.data || []);
+      setLists(listsRes.data.data || []);
     } catch (error) {
-      console.error('Error loading quizzes:', error);
-      toast.error('Error al cargar los quizzes');
+      console.error('Error loading data:', error);
+      toast.error('Error al cargar datos');
     } finally {
       setLoading(false);
     }
@@ -63,7 +77,7 @@ export default function CreateGamePage() {
 
     try {
       setCreating(true);
-      const { data } = await api.post('/games', {
+      const payload: any = {
         set_id: parseInt(selectedQuiz),
         game_mode: gameMode,
         max_players: parseInt(maxPlayers),
@@ -71,9 +85,21 @@ export default function CreateGamePage() {
           show_leaderboard_live: showLeaderboard,
           points_for_speed: speedPoints,
         },
-      });
+      };
 
-      toast.success('¡Juego creado!');
+      // Agregar lista si se seleccionó
+      if (selectedList) {
+        payload.list_id = parseInt(selectedList);
+      }
+
+      const { data } = await api.post('/games', payload);
+
+      if (selectedList) {
+        toast.success('¡Juego creado! Invitaciones enviadas a los estudiantes');
+      } else {
+        toast.success('¡Juego creado!');
+      }
+      
       navigate(`/game/lobby/${data.data.game_code}`);
     } catch (error: any) {
       console.error('Error creating game:', error);
@@ -135,20 +161,49 @@ export default function CreateGamePage() {
                     <Loader2 className="w-8 h-8 animate-spin text-blue-400" />
                   </div>
                 ) : (
-                  <div>
-                    <Label className="text-purple-200 font-gaming mb-2 block">Quiz</Label>
-                    <Select value={selectedQuiz} onValueChange={setSelectedQuiz}>
-                      <SelectTrigger className="bg-slate-900 text-white border-purple-500/50">
-                        <SelectValue placeholder="Selecciona un quiz..." />
-                      </SelectTrigger>
-                      <SelectContent className="bg-slate-900 border-purple-500">
-                        {quizzes.map((quiz) => (
-                          <SelectItem key={quiz.set_id} value={quiz.set_id.toString()} className="text-white hover:bg-purple-500/20">
-                            {quiz.title} ({quiz._count.questions} preguntas)
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                  <div className="space-y-4">
+                    <div>
+                      <Label className="text-purple-200 font-gaming mb-2 block">Quiz *</Label>
+                      <Select value={selectedQuiz} onValueChange={setSelectedQuiz}>
+                        <SelectTrigger className="bg-slate-900 text-white border-purple-500/50">
+                          <SelectValue placeholder="Selecciona un quiz..." />
+                        </SelectTrigger>
+                        <SelectContent className="bg-slate-900 border-purple-500">
+                          {quizzes.map((quiz) => (
+                            <SelectItem key={quiz.set_id} value={quiz.set_id.toString()} className="text-white hover:bg-purple-500/20">
+                              {quiz.title} ({quiz._count.questions} preguntas)
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div>
+                      <Label className="text-indigo-200 font-gaming mb-2 block">Lista de Estudiantes (Opcional)</Label>
+                      <Select value={selectedList || ''} onValueChange={(value) => setSelectedList(value || undefined)}>
+                        <SelectTrigger className="bg-slate-900 text-white border-indigo-500/50">
+                          <SelectValue placeholder="Sin lista - Unirse por código" />
+                        </SelectTrigger>
+                        <SelectContent className="bg-slate-900 border-indigo-500">
+                          {lists.length === 0 ? (
+                            <div className="p-4 text-center text-gray-400 text-sm">
+                              No tienes listas creadas
+                            </div>
+                          ) : (
+                            lists.map((list) => (
+                              <SelectItem key={list.list_id} value={list.list_id.toString()} className="text-white hover:bg-indigo-500/20">
+                                {list.name} ({list.student_count} estudiantes)
+                              </SelectItem>
+                            ))
+                          )}
+                        </SelectContent>
+                      </Select>
+                      {selectedList && (
+                        <p className="text-xs text-green-300 mt-1 flex items-center gap-1">
+                          ✅ Se enviará invitación automática a los estudiantes
+                        </p>
+                      )}
+                    </div>
                   </div>
                 )}
               </CardContent>

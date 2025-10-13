@@ -39,30 +39,9 @@ export default function IntermediateRankingScreen({
   const { width, height } = useWindowSize();
   const [rankChange, setRankChange] = useState<'up' | 'down' | 'same'>('same');
   
-  // **DEBUG LOGS**
-  console.log('[IntermediateRanking] 🔍 Props recibidas:', {
-    leaderboard,
-    currentUserId,
-    previousRank,
-    lastResult,
-  });
-  console.log('[IntermediateRanking] 🔍 lastResult detalles:', lastResult ? {
-    pointsEarned: lastResult.pointsEarned,
-    breakdown: lastResult.breakdown,
-  } : 'NULL');
-  
   const currentPlayer = leaderboard.find(p => p.user_id === currentUserId);
   const currentRank = currentPlayer?.rank || 0;
   const totalPlayers = leaderboard.length;
-  
-  console.log('[IntermediateRanking] 🔍 Current player:', currentPlayer);
-  console.log('[IntermediateRanking] 🔍 Current player DETALLES:', {
-    score: currentPlayer?.score,
-    correct_answers: currentPlayer?.correct_answers,
-    combo_streak: currentPlayer?.combo_streak,
-  });
-  console.log('[IntermediateRanking] 🔍 Current rank:', currentRank);
-  console.log('[IntermediateRanking] 🔍 Total players:', totalPlayers);
 
   useEffect(() => {
     if (previousRank !== undefined && previousRank !== currentRank) {

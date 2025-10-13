@@ -86,30 +86,21 @@ export default function GamePlayPage() {
     const socket = getSocket();
     if (!socket || !gameCode) return;
 
-    console.log('[GamePlayPage] Uniéndose al room:', gameCode);
-
     // Unirse al room del juego
-    console.log('[GamePlayPage] ⚡ Emitiendo game:join-room para:', gameCode);
     socket.emit('game:join-room', { gameCode }, (response: any) => {
       if (response.success) {
-        console.log('[GamePlayPage] ✅ Unido al room exitosamente');
-        console.log('[GamePlayPage] ✅ Game data:', response.game);
-        console.log('[GamePlayPage] ✅ Players:', response.players);
-        console.log('[GamePlayPage] ✅ Game status:', response.gameStatus);
 
         // Guardar game data
         setGame(response.game);
 
         // Si el juego está en lobby, redirigir al lobby
         if (response.gameStatus === 'lobby') {
-          console.log('[GamePlayPage] Juego aún en lobby, redirigiendo...');
           navigate(`/game/lobby/${gameCode}`);
           return;
         }
 
         // Si el juego ya terminó, mostrar resultados
         if (response.gameStatus === 'finished') {
-          console.log('[GamePlayPage] Juego finalizado');
           setPhase('finished');
         }
 
@@ -120,15 +111,12 @@ export default function GamePlayPage() {
 
         // **CRÍTICO PARA RECONEXIÓN**: Recuperar estado completo desde Redis
         if (response.gameStatus === 'active' || response.gameStatus === 'starting') {
-          console.log('[GamePlayPage] 🔄 Recuperando estado del juego desde Redis...');
           socket.emit('game:get-state', { gameCode }, (stateResponse: any) => {
             if (stateResponse.success && stateResponse.state) {
               const state = stateResponse.state;
-              console.log('[GamePlayPage] ✅ Estado recuperado:', state);
 
               // Restaurar pregunta actual si existe
               if (state.currentQuestion) {
-                console.log('[GamePlayPage] 🔄 Restaurando pregunta actual...', state.currentQuestion);
 
                 // El backend retorna el formato correcto directamente desde prepareQuestion
                 const questionData = {
@@ -147,23 +135,18 @@ export default function GamePlayPage() {
                 setCurrentQuestion(questionData);
                 setTimeRemaining(state.currentQuestion.timeLimit);
                 setPhase('question');
-                console.log('[GamePlayPage] ✅ Pregunta restaurada:', questionData);
               } else {
-                console.log('[GamePlayPage] ℹ️ No hay pregunta actual, modo waiting');
                 setPhase('waiting');
               }
 
               // Restaurar leaderboard
               if (state.leaderboard && state.leaderboard.length > 0) {
                 setLeaderboard(state.leaderboard);
-                console.log('[GamePlayPage] ✅ Leaderboard restaurado:', state.leaderboard.length, 'jugadores');
-                console.log('[GamePlayPage] 🔍 USER IDs en leaderboard inicial:', state.leaderboard.map((p: any) => ({ user_id: p.user_id, nickname: p.nickname, username: p.username })));
               }
 
               // Restaurar total de jugadores
               if (state.allPlayers) {
                 setTotalPlayers(state.allPlayers.length);
-                console.log('[GamePlayPage] ✅ Total jugadores:', state.allPlayers.length);
               }
 
               toast.success('Estado del juego recuperado', { icon: '♻️', duration: 2000 });
@@ -174,7 +157,6 @@ export default function GamePlayPage() {
           });
         } else {
           // Si no está activo, simplemente esperar
-          console.log('[GamePlayPage] Estado del juego:', response.gameStatus);
           setPhase('waiting');
         }
       } else {
@@ -185,18 +167,15 @@ export default function GamePlayPage() {
 
     // Escuchar countdown
     socket.on('game:countdown', (data: { count: number | string }) => {
-      console.log('[GamePlayPage] Countdown recibido:', data.count);
       setCountdown(data.count);
       // El countdown se limpiará cuando llegue question:new
     });
 
     // Escuchar eventos del juego
     socket.on('question:new', (data: any) => {
-      console.log('[GamePlayPage] ✅ Nueva pregunta recibida:', data);
 
       // **CRÍTICO**: Cancelar timeout de question:results si existe
       if (questionResultsTimeoutRef.current) {
-        console.log('[GamePlayPage] 🚫 Cancelando timeout de question:results');
         clearTimeout(questionResultsTimeoutRef.current);
         questionResultsTimeoutRef.current = null;
       }
@@ -215,8 +194,6 @@ export default function GamePlayPage() {
         timeLimit: data.timeLimit,
       };
 
-      console.log('[GamePlayPage] ✅ Pregunta:', questionData.question.question_text);
-      console.log('[GamePlayPage] ✅ Cambiando a phase=question');
       setCurrentQuestion(questionData);
       setTimeRemaining(data.timeLimit);
       setSelectedOption(null);
@@ -237,33 +214,21 @@ export default function GamePlayPage() {
         toast.error('¡Se acabó el tiempo!');
         // Si no contestó, ir directo a intermediate-ranking (el backend tiene 2s de congelación)
         setTimeout(() => {
-          console.log('[GamePlayPage] ⏰ Timeout - cambiando a intermediate-ranking');
           setPhase('intermediate-ranking');
         }, 1000); // 1 segundo después del toast
       }
     });
 
     socket.on('question:results', (data: { leaderboard: LeaderboardPlayer[] }) => {
-      console.log('[GamePlayPage] 📊 Resultados de pregunta recibidos:', data);
-      console.log('[GamePlayPage] 🔍 User ID actual:', user?.id);
-      console.log('[GamePlayPage] 🔍 answerResult actual:', answerResult);
-      console.log('[GamePlayPage] 🔍 Leaderboard completo:', data.leaderboard);
-      console.log('[GamePlayPage] 🔍 USER IDs en leaderboard:', data.leaderboard.map(p => ({ user_id: p.user_id, nickname: p.nickname, username: p.username })));
       
       // Guardar posición anterior antes de actualizar
       const currentPlayerInLeaderboard = leaderboard.find(p => p.user_id === user?.id);
       if (currentPlayerInLeaderboard) {
-        console.log('[GamePlayPage] ✅ Player encontrado en leaderboard anterior:', currentPlayerInLeaderboard);
         setPreviousRank(currentPlayerInLeaderboard.rank);
       } else {
-        console.log('[GamePlayPage] ⚠️ Player NO encontrado en leaderboard anterior');
       }
       
       setLeaderboard(data.leaderboard);
-      
-      // Verificar que el player esté en el nuevo leaderboard
-      const newCurrentPlayer = data.leaderboard.find(p => p.user_id === user?.id);
-      console.log('[GamePlayPage] 🔍 Player en nuevo leaderboard:', newCurrentPlayer);
       
       // **FLUJO DE DOS PANTALLAS**:
       // 1. Si el estudiante contestó: mostrar resultado individual (2-3s)
@@ -271,15 +236,12 @@ export default function GamePlayPage() {
       // 3. Finalmente volver a waiting
       
       // Solo hacer transición si ya mostró su resultado individual
-      console.log('[GamePlayPage] 🔍 answerResultRef.current:', answerResultRef.current);
       if (answerResultRef.current) {
         questionResultsTimeoutRef.current = setTimeout(() => {
-          console.log('[GamePlayPage] ⏰ Cambiando de result a intermediate-ranking');
           setPhase('intermediate-ranking');
           
           // Después de 5s más, volver a waiting
           questionResultsTimeoutRef.current = setTimeout(() => {
-            console.log('[GamePlayPage] ⏰ Volviendo a waiting (esperando siguiente pregunta)');
             setPhase('waiting');
             setAnswerResult(null);
             answerResultRef.current = null; // Limpiar ref
@@ -291,7 +253,6 @@ export default function GamePlayPage() {
       } else {
         // Si no contestó (ya está en intermediate-ranking desde timeout), solo volver a waiting después
         questionResultsTimeoutRef.current = setTimeout(() => {
-          console.log('[GamePlayPage] ⏰ Volviendo a waiting (no contestó)');
           setPhase('waiting');
           setAnswerResult(null);
           answerResultRef.current = null; // Limpiar ref
@@ -308,11 +269,9 @@ export default function GamePlayPage() {
     });
 
     socket.on('game:finished', (data: any) => {
-      console.log('[GamePlayPage] 🏁 Juego finalizado:', data);
       
       // **IMPORTANTE**: Cancelar cualquier timeout pendiente
       if (questionResultsTimeoutRef.current) {
-        console.log('[GamePlayPage] 🚫 Cancelando timeout pendiente para mostrar finalización');
         clearTimeout(questionResultsTimeoutRef.current);
         questionResultsTimeoutRef.current = null;
       }
@@ -349,7 +308,6 @@ export default function GamePlayPage() {
 
   const handleAnswerSubmit = (optionId: number) => {
     if (selectedOption !== null) {
-      console.log('[GamePlayPage] ⚠️ Ya hay una opción seleccionada, ignorando');
       return;
     }
 
@@ -365,13 +323,6 @@ export default function GamePlayPage() {
       return;
     }
 
-    console.log('[GamePlayPage] 📤 Enviando respuesta:', {
-      gameCode,
-      questionId: currentQuestion.question.question_id,
-      optionId,
-      timeRemaining
-    });
-
     setSelectedOption(optionId);
 
     const timeTaken = (currentQuestion.timeLimit - timeRemaining) * 1000;
@@ -385,7 +336,6 @@ export default function GamePlayPage() {
         timeTaken,
       },
       (response: any) => {
-        console.log('[GamePlayPage] 📬 Respuesta del servidor recibida:', response);
         
         if (!response) {
           console.error('[GamePlayPage] ❌ Respuesta vacía del servidor');
@@ -395,8 +345,6 @@ export default function GamePlayPage() {
         }
 
         if (response.success) {
-          console.log('[GamePlayPage] ✅ Respuesta procesada correctamente');
-          console.log('[GamePlayPage] 📊 Resultado completo:', JSON.stringify(response.result, null, 2));
           
           if (!response.result) {
             console.error('[GamePlayPage] ❌ Resultado vacío en respuesta exitosa');
@@ -407,11 +355,8 @@ export default function GamePlayPage() {
 
           setAnswerResult(response.result);
           answerResultRef.current = response.result; // ✅ Actualizar ref también
-          console.log('[GamePlayPage] ✅ answerResult actualizado');
           
           setPhase('result');
-          console.log('[GamePlayPage] ✅ Phase cambiado a "result"');
-          console.log('[GamePlayPage] 📊 Estado actual:', { phase: 'result', hasResult: !!response.result });
           
           // Incrementar contador de respuestas (para teachers)
           setAnswersReceived(prev => prev + 1);

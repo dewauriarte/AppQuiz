@@ -2,7 +2,7 @@ import { createServer } from 'http';
 import app from './app';
 import { env } from '@config/env';
 import prisma from '@config/database';
-import { connectRedis } from '@config/redis';
+import redis, { closeRedis } from '@config/redis';
 import { initializeSocket } from '@config/socket';
 import { registerGameHandlers } from '@/socket/gameHandlers';
 
@@ -14,11 +14,13 @@ const startServer = async () => {
     await prisma.$connect();
     console.info('✅ Database connected successfully');
 
-    // Connect to Redis (opcional)
+    // Test Redis connection
     try {
-      await connectRedis();
+      await redis.ping();
+      console.info('✅ Redis connected successfully');
     } catch (redisError) {
-      console.warn('⚠️ Redis connection failed, continuing without Redis');
+      console.warn('⚠️ Redis connection failed, continuing without Redis cache');
+      console.warn('   Game sessions will not persist across server restarts');
     }
 
     // Create HTTP server
@@ -46,12 +48,14 @@ const startServer = async () => {
 process.on('SIGINT', async () => {
   console.info('\n⏹️  Shutting down gracefully...');
   await prisma.$disconnect();
+  await closeRedis();
   process.exit(0);
 });
 
 process.on('SIGTERM', async () => {
   console.info('\n⏹️  Shutting down gracefully...');
   await prisma.$disconnect();
+  await closeRedis();
   process.exit(0);
 });
 

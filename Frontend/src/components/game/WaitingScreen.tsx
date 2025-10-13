@@ -105,7 +105,7 @@ export default function WaitingScreen({ countdown }: WaitingScreenProps) {
                 ESPERANDO...
               </h2>
               <p className="text-lg text-purple-300 font-gaming">
-                El juego comenzará pronto
+                Siguiente pregunta en breve
               </p>
 
               <motion.div

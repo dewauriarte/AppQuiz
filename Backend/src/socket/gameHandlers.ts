@@ -3,15 +3,19 @@ import { CustomSocket } from '@/config/socket';
 import prisma from '@/config/database';
 import { GameStatus } from '@prisma/client';
 import GameplayService from '@/services/GameplayService';
+import RedisGameSessionService, { PlayerState } from '@/services/RedisGameSessionService';
 
 interface JoinGamePayload {
   gameCode: string;
   nickname?: string;
 }
 
-const gameRooms = new Map<string, Set<number>>(); // gameCode -> Set of userIds
-const playerReadyStatus = new Map<string, Map<number, boolean>>(); // gameCode -> userId -> isReady
-const playerNicknames = new Map<string, Map<number, string>>(); // gameCode -> userId -> nickname
+/**
+ * **ARQUITECTURA REDIS**:
+ * - NO usamos Maps en memoria (se pierden al recargar servidor)
+ * - TODO el estado vive en Redis
+ * - Socket.IO solo maneja conexiones
+ */
 
 export function registerGameHandlers(io: Server): void {
   io.on('connection', (socket: CustomSocket) => {
@@ -67,15 +71,17 @@ export function registerGameHandlers(io: Server): void {
         // Preparar nickname
         const playerNickname = nickname || user.username;
 
-        // Validar nickname único en el juego
-        const nicknameExists = game.game_players.some(
-          p => p.nickname?.toLowerCase() === playerNickname.toLowerCase() && p.user_id !== user.userId
+        // **REDIS**: Validar nickname único usando Redis
+        const nicknameInUse = await RedisGameSessionService.isNicknameInUse(
+          gameCode,
+          playerNickname,
+          user.userId
         );
 
-        if (nicknameExists) {
-          return callback({ 
-            success: false, 
-            message: 'Este nickname ya está en uso en este juego' 
+        if (nicknameInUse) {
+          return callback({
+            success: false,
+            message: 'Este nickname ya está en uso en este juego'
           });
         }
 
@@ -104,21 +110,37 @@ export function registerGameHandlers(io: Server): void {
         // Unirse al room de Socket.IO
         socket.join(`game:${gameCode}`);
 
-        // Actualizar tracking
-        if (!gameRooms.has(gameCode)) {
-          gameRooms.set(gameCode, new Set());
+        // **REDIS**: Asegurar que la sesión existe (crear si no existe)
+        let sessionExists = await RedisGameSessionService.getGameSession(gameCode);
+        if (!sessionExists) {
+          console.log(`🔄 Creating Redis session for new game ${gameCode}`);
+          await GameplayService.recoverSession(gameCode);
         }
-        gameRooms.get(gameCode)!.add(user.userId);
 
-        if (!playerReadyStatus.has(gameCode)) {
-          playerReadyStatus.set(gameCode, new Map());
-        }
-        playerReadyStatus.get(gameCode)!.set(user.userId, false);
+        // **REDIS**: Agregar jugador a Redis
+        await RedisGameSessionService.addPlayerToGame(gameCode, user.userId, playerNickname);
 
-        if (!playerNicknames.has(gameCode)) {
-          playerNicknames.set(gameCode, new Map());
+        // **REDIS**: Crear estado inicial del jugador si no existe
+        let playerState: PlayerState | null = await RedisGameSessionService.getPlayerState(gameCode, user.userId);
+        if (!playerState) {
+          playerState = {
+            userId: user.userId,
+            nickname: playerNickname,
+            score: 0,
+            correctAnswers: 0,
+            wrongAnswers: 0,
+            comboStreak: 0,
+            highestCombo: 0,
+            totalTimeTaken: 0,
+            isConnected: true,
+          };
+          await RedisGameSessionService.setPlayerState(gameCode, user.userId, playerState);
+        } else {
+          // Solo actualizar conexión si ya existe
+          await GameplayService.setPlayerConnection(gameCode, user.userId, true);
         }
-        playerNicknames.get(gameCode)!.set(user.userId, playerNickname);
+
+        console.log(`✅ Player ${user.userId} joined and synced to Redis for ${gameCode}`);
 
         // Obtener lista actualizada de jugadores
         const updatedGame = await prisma.games.findUnique({
@@ -143,11 +165,17 @@ export function registerGameHandlers(io: Server): void {
           username: p.users?.username || 'Unknown',
           display_name: p.users?.display_name || null,
           nickname: p.nickname,
-          isReady: p.user_id ? (playerReadyStatus.get(gameCode)?.get(p.user_id) || false) : false,
+          isReady: p.is_ready || false, // Leer desde BD
           score: 0,
         }));
 
         // Notificar a todos en el lobby
+        const socketsInRoom = io.sockets.adapter.rooms.get(`game:${gameCode}`);
+        console.log(`✅ Player ${user.userId} joined successfully`);
+        console.log(`📢 Emitiendo 'game:player-joined' al room game:${gameCode}`);
+        console.log(`🔌 Sockets en room:`, socketsInRoom ? socketsInRoom.size : 0);
+        console.log(`👥 Total jugadores:`, players.length);
+
         io.to(`game:${gameCode}`).emit('game:player-joined', {
           player: {
             user_id: user.userId,
@@ -168,6 +196,7 @@ export function registerGameHandlers(io: Server): void {
     /**
      * Unirse solo al room (sin agregar como jugador)
      * Útil para teachers y jugadores que ya están en el juego
+     * CON RECUPERACIÓN DE SESIÓN DESDE REDIS
      */
     socket.on('game:join-room', async ({ gameCode }, callback) => {
       try {
@@ -199,14 +228,54 @@ export function registerGameHandlers(io: Server): void {
           return callback({ success: false, message: 'Juego no encontrado' });
         }
 
+        // **CRÍTICO**: Asegurar que la sesión existe en Redis para TODOS los estados
+        // No solo para active/starting, también para lobby
+        let sessionExists = await RedisGameSessionService.getGameSession(gameCode);
+
+        if (!sessionExists) {
+          console.log(`🔄 Session not found in Redis for ${gameCode}, creating from DB...`);
+          const recovered = await GameplayService.recoverSession(gameCode);
+
+          if (recovered) {
+            console.log(`✅ Session created in Redis for ${gameCode}`);
+          } else {
+            console.warn(`⚠️ Could not create session for ${gameCode}`);
+          }
+        } else {
+          console.log(`♻️ Session already exists in Redis for ${gameCode}`);
+        }
+
         // Unirse al room de Socket.IO
         socket.join(`game:${gameCode}`);
 
-        // Actualizar tracking solo si no está
-        if (!gameRooms.has(gameCode)) {
-          gameRooms.set(gameCode, new Set());
+        // **REDIS**: Asegurar que está en la lista de jugadores
+        const gamePlayer = game.game_players.find(p => p.user_id === user.userId);
+        if (gamePlayer) {
+          // Agregar/actualizar en Redis
+          await RedisGameSessionService.addPlayerToGame(gameCode, user.userId, gamePlayer.nickname);
+
+          // **REDIS**: Crear estado inicial del jugador si no existe
+          let playerState: PlayerState | null = await RedisGameSessionService.getPlayerState(gameCode, user.userId);
+          if (!playerState) {
+            playerState = {
+              userId: user.userId,
+              nickname: gamePlayer.nickname,
+              score: gamePlayer.score,
+              correctAnswers: gamePlayer.correct_answers,
+              wrongAnswers: gamePlayer.wrong_answers,
+              comboStreak: gamePlayer.combo_streak,
+              highestCombo: gamePlayer.highest_combo,
+              totalTimeTaken: gamePlayer.total_time_played_ms || 0,
+              isConnected: true,
+            };
+            await RedisGameSessionService.setPlayerState(gameCode, user.userId, playerState);
+          } else {
+            // Solo actualizar conexión
+            await GameplayService.setPlayerConnection(gameCode, user.userId, true);
+          }
+
+          console.log(`✅ Player ${user.userId} synced to Redis for game ${gameCode}`);
         }
-        gameRooms.get(gameCode)!.add(user.userId);
 
         // Obtener lista actualizada de jugadores
         const players = game.game_players.map(p => ({
@@ -214,11 +283,20 @@ export function registerGameHandlers(io: Server): void {
           username: p.users?.username || 'Unknown',
           display_name: p.users?.display_name || null,
           nickname: p.nickname,
-          isReady: p.user_id ? (playerReadyStatus.get(gameCode)?.get(p.user_id) || false) : false,
+          isReady: p.is_ready || false,
           score: 0,
         }));
 
-        callback({ success: true, game, players });
+        // Si el juego ya está activo, redirigir al jugador
+        const shouldRedirect = game.status === GameStatus.active || game.status === GameStatus.starting;
+
+        callback({
+          success: true,
+          game,
+          players,
+          shouldRedirect,
+          gameStatus: game.status,
+        });
       } catch (error) {
         console.error('Error joining room:', error);
         callback({ success: false, message: 'Error al unirse al room' });
@@ -230,20 +308,68 @@ export function registerGameHandlers(io: Server): void {
      */
     socket.on('game:ready', async ({ gameCode }, callback) => {
       try {
-        if (!playerReadyStatus.has(gameCode)) {
+        // Buscar el juego y el jugador
+        const game = await prisma.games.findUnique({
+          where: { game_code: gameCode },
+          include: {
+            game_players: true,
+          },
+        });
+
+        if (!game) {
           return callback({ success: false, message: 'Juego no encontrado' });
         }
 
-        playerReadyStatus.get(gameCode)!.set(user.userId, true);
+        // Actualizar en la base de datos
+        await prisma.game_players.updateMany({
+          where: {
+            game_id: game.game_id,
+            user_id: user.userId,
+          },
+          data: {
+            is_ready: true,
+          },
+        });
 
-        const readyMap = playerReadyStatus.get(gameCode)!;
-        const totalPlayers = readyMap.size;
-        const readyPlayers = Array.from(readyMap.values()).filter(Boolean).length;
+        // Obtener jugadores actualizados
+        const updatedGame = await prisma.games.findUnique({
+          where: { game_code: gameCode },
+          include: {
+            game_players: {
+              include: {
+                users: {
+                  select: {
+                    user_id: true,
+                    username: true,
+                    display_name: true,
+                  },
+                },
+              },
+            },
+          },
+        });
 
+        if (!updatedGame) {
+          return callback({ success: false, message: 'Error al actualizar estado' });
+        }
+
+        const players = updatedGame.game_players.map(p => ({
+          user_id: p.user_id,
+          username: p.users?.username || 'Unknown',
+          display_name: p.users?.display_name || null,
+          nickname: p.nickname,
+          isReady: p.is_ready || false,
+          score: 0,
+        }));
+
+        const readyPlayers = players.filter(p => p.isReady).length;
+
+        // Emitir evento con la lista actualizada
         io.to(`game:${gameCode}`).emit('game:player-ready', {
           userId: user.userId,
           readyPlayers,
-          totalPlayers,
+          totalPlayers: players.length,
+          players, // Enviar lista completa actualizada
         });
 
         callback({ success: true });
@@ -274,8 +400,9 @@ export function registerGameHandlers(io: Server): void {
           return callback({ success: false, message: 'El juego ya comenzó' });
         }
 
-        const playersInLobby = gameRooms.get(gameCode)?.size || 0;
-        if (playersInLobby < 1) {
+        // **REDIS**: Obtener número de jugadores desde Redis
+        const playerIds = await RedisGameSessionService.getPlayerIds(gameCode);
+        if (playerIds.length < 1) {
           return callback({ success: false, message: 'Se necesita al menos 1 jugador' });
         }
 
@@ -289,34 +416,38 @@ export function registerGameHandlers(io: Server): void {
         });
 
         // Emitir "Get Ready"
+        console.log(`[Game ${gameCode}] 📢 Emitiendo countdown 'starting'...`);
         io.to(`game:${gameCode}`).emit('game:countdown', { count: 'starting' });
 
         // Después de 2 segundos, cambiar a active y enviar primera pregunta
+        console.log(`[Game ${gameCode}] ⏱️ Iniciando timeout de 2s para activar juego...`);
         setTimeout(async () => {
           try {
-            console.log(`[Game ${gameCode}] Inicializando gameplay...`);
+            console.log(`[Game ${gameCode}] ========== TIMEOUT EJECUTADO ==========`);
+            console.log(`[Game ${gameCode}] 🎮 Inicializando gameplay...`);
             // Inicializar gameplay
             await GameplayService.initializeGame(gameCode);
-            console.log(`[Game ${gameCode}] Gameplay inicializado`);
+            console.log(`[Game ${gameCode}] ✅ Gameplay inicializado`);
 
             await prisma.games.update({
               where: { game_code: gameCode },
               data: { status: GameStatus.active },
             });
-            console.log(`[Game ${gameCode}] Estado cambiado a active`);
+            console.log(`[Game ${gameCode}] ✅ Estado cambiado a active en BD`);
 
             // Notificar que el juego comenzó (para que naveguen a GamePlayPage)
-            console.log(`[Game ${gameCode}] Emitiendo game:started`);
+            console.log(`[Game ${gameCode}] 📢 Emitiendo 'game:started'...`);
             io.to(`game:${gameCode}`).emit('game:started');
 
             // Dar un momento para que naveguen
-            setTimeout(() => {
+            console.log(`[Game ${gameCode}] ⏱️ Esperando 500ms para que naveguen...`);
+            setTimeout(async () => {
               // Enviar primera pregunta
-              console.log(`[Game ${gameCode}] Enviando primera pregunta...`);
-              sendQuestion(io, gameCode);
+              console.log(`[Game ${gameCode}] 📝 Llamando a sendQuestion()...`);
+              await sendQuestion(io, gameCode);
             }, 500);
           } catch (error) {
-            console.error(`[Game ${gameCode}] Error activating game:`, error);
+            console.error(`[Game ${gameCode}] ❌ Error activating game:`, error);
             io.to(`game:${gameCode}`).emit('game:error', {
               message: 'Error al iniciar el juego',
             });
@@ -332,26 +463,25 @@ export function registerGameHandlers(io: Server): void {
 
     /**
      * Salir del juego
+     * **REDIS**: Elimina jugador de Redis y BD
      */
     socket.on('game:leave', async ({ gameCode }, callback) => {
       try {
         socket.leave(`game:${gameCode}`);
 
-        if (gameRooms.has(gameCode)) {
-          gameRooms.get(gameCode)!.delete(user.userId);
-        }
-
-        if (playerReadyStatus.has(gameCode)) {
-          playerReadyStatus.get(gameCode)!.delete(user.userId);
-        }
+        // **REDIS**: Marcar como desconectado en Redis
+        await GameplayService.setPlayerConnection(gameCode, user.userId, false);
 
         // Eliminar de la base de datos
-        await prisma.game_players.deleteMany({
-          where: {
-            game_id: (await prisma.games.findUnique({ where: { game_code: gameCode } }))?.game_id,
-            user_id: user.userId,
-          },
-        });
+        const game = await prisma.games.findUnique({ where: { game_code: gameCode } });
+        if (game) {
+          await prisma.game_players.deleteMany({
+            where: {
+              game_id: game.game_id,
+              user_id: user.userId,
+            },
+          });
+        }
 
         // Notificar a otros jugadores
         io.to(`game:${gameCode}`).emit('game:player-left', {
@@ -368,16 +498,21 @@ export function registerGameHandlers(io: Server): void {
 
     /**
      * Desconexión
+     * **REDIS**: Marca jugador como desconectado en Redis (NO elimina)
+     * Permite reconexión automática
      */
     socket.on('disconnect', async () => {
-      console.log(`Player ${user.username} disconnected`);
-      
-      // Remover de todos los juegos
-      for (const [gameCode, players] of gameRooms.entries()) {
-        if (players.has(user.userId)) {
-          players.delete(user.userId);
-          playerReadyStatus.get(gameCode)?.delete(user.userId);
-          playerNicknames.get(gameCode)?.delete(user.userId);
+      console.log(`❌ Player ${user.username} disconnected`);
+
+      // **REDIS**: Buscar juegos donde este usuario está conectado
+      const activeGames = await RedisGameSessionService.getActiveGames();
+
+      for (const gameCode of activeGames) {
+        const playerState = await RedisGameSessionService.getPlayerState(gameCode, user.userId);
+
+        if (playerState) {
+          // **REDIS**: Marcar como desconectado (no eliminar)
+          await GameplayService.setPlayerConnection(gameCode, user.userId, false);
 
           // Verificar si es el teacher
           try {
@@ -398,22 +533,24 @@ export function registerGameHandlers(io: Server): void {
                     message: 'El profesor ha salido del juego',
                   });
 
-                  // Limpiar tracking
-                  gameRooms.delete(gameCode);
-                  playerReadyStatus.delete(gameCode);
-                  playerNicknames.delete(gameCode);
+                  // Limpiar Redis
+                  await RedisGameSessionService.cleanupGameSession(gameCode);
                 } else if (game.status === GameStatus.active) {
-                  // Si está activo, pausar
-                  io.to(`game:${gameCode}`).emit('game:paused', {
-                    message: 'El profesor se desconectó, juego pausado',
+                  // Si está activo, NO pausar - permitir reconexión
+                  io.to(`game:${gameCode}`).emit('game:player-disconnected', {
+                    userId: user.userId,
+                    username: user.username,
+                    message: 'El profesor se desconectó temporalmente',
                   });
+                  console.log(`⚠️ Teacher disconnected from active game: ${gameCode}, session preserved for reconnection`);
                 }
               } else {
-                // Es un estudiante, solo notificar
+                // Es un estudiante, solo notificar (sesión se mantiene)
                 io.to(`game:${gameCode}`).emit('game:player-disconnected', {
                   userId: user.userId,
                   username: user.username,
                 });
+                console.log(`ℹ️ Student disconnected from game: ${gameCode}, session preserved for reconnection`);
               }
             }
           } catch (error) {
@@ -443,15 +580,110 @@ export function registerGameHandlers(io: Server): void {
           timeTaken
         );
 
-        // Enviar resultado al jugador
-        callback({ success: true, result });
+        // Obtener estado actualizado del jugador para incluir newScore y newCombo
+        const playerState = await RedisGameSessionService.getPlayerState(gameCode, user.userId);
+
+        // **FIX**: Transformar respuesta al formato que espera el frontend
+        const transformedResult = {
+          isCorrect: result.isCorrect,
+          correctOptionId: result.correctOptionId,
+          pointsEarned: result.scoreResult.totalPoints,
+          newScore: playerState?.score || 0,
+          newCombo: playerState?.comboStreak || 0,
+          breakdown: {
+            basePoints: result.scoreResult.basePoints,
+            speedBonus: result.scoreResult.speedBonus,
+            comboMultiplier: result.scoreResult.comboMultiplier,
+            totalPoints: result.scoreResult.totalPoints,
+          },
+          explanation: result.explanation,
+        };
+
+        // Enviar resultado transformado al jugador
+        console.log(`✅ Respuesta procesada para ${user.username}:`, transformedResult);
+        callback({ success: true, result: transformedResult });
 
         // Actualizar leaderboard
         const leaderboard = await GameplayService.getLeaderboard(gameCode);
-        io.to(`game:${gameCode}`).emit('leaderboard:update', { leaderboard });
+        
+        // **FIX**: Mapear de camelCase (backend) a snake_case (frontend)
+        const mappedLeaderboard = leaderboard.map(player => ({
+          rank: player.rank,
+          user_id: player.userId,
+          nickname: player.nickname,
+          username: player.nickname,
+          score: player.score,
+          correct_answers: player.correctAnswers,
+          wrong_answers: player.wrongAnswers,
+          combo_streak: player.comboStreak,
+          highest_combo: player.highestCombo,
+        }));
+        
+        io.to(`game:${gameCode}`).emit('leaderboard:update', { leaderboard: mappedLeaderboard });
 
       } catch (error: any) {
         console.error('Error processing answer:', error);
+        callback({ success: false, message: error.message });
+      }
+    });
+
+    /**
+     * Obtener estado completo del juego desde Redis
+     * **CRÍTICO PARA RECONEXIÓN**: Permite recuperar estado al recargar
+     */
+    socket.on('game:get-state', async ({ gameCode }, callback) => {
+      try {
+        // Recuperar sesión desde Redis (o desde BD si no existe)
+        const sessionExists = await RedisGameSessionService.getGameSession(gameCode);
+
+        if (!sessionExists) {
+          // Intentar recuperar desde BD
+          const recovered = await GameplayService.recoverSession(gameCode);
+          if (!recovered) {
+            return callback({
+              success: false,
+              message: 'Sesión de juego no encontrada'
+            });
+          }
+        }
+
+        // Obtener estado completo
+        const gameSession = await RedisGameSessionService.getGameSession(gameCode);
+        const playerState = await RedisGameSessionService.getPlayerState(gameCode, user.userId);
+        const leaderboard = await GameplayService.getLeaderboard(gameCode);
+        const allPlayers = await RedisGameSessionService.getAllPlayers(gameCode);
+
+        // **FIX**: Mapear leaderboard de camelCase a snake_case
+        const mappedLeaderboard = leaderboard.map(player => ({
+          rank: player.rank,
+          user_id: player.userId,
+          nickname: player.nickname,
+          username: player.nickname,
+          score: player.score,
+          correct_answers: player.correctAnswers,
+          wrong_answers: player.wrongAnswers,
+          combo_streak: player.comboStreak,
+          highest_combo: player.highestCombo,
+        }));
+
+        // Si el juego está activo y hay una pregunta en curso, enviarla
+        let currentQuestion = null;
+        if (gameSession && gameSession.status === GameStatus.active) {
+          currentQuestion = await GameplayService.prepareQuestion(gameCode);
+        }
+
+        callback({
+          success: true,
+          state: {
+            gameSession,
+            playerState,
+            leaderboard: mappedLeaderboard,  // Usar el leaderboard mapeado
+            allPlayers,
+            currentQuestion,
+          }
+        });
+      } catch (error: any) {
+        console.error('Error getting game state:', error);
         callback({ success: false, message: error.message });
       }
     });
@@ -461,27 +693,33 @@ export function registerGameHandlers(io: Server): void {
 /**
  * Envía una pregunta a todos los jugadores
  */
-function sendQuestion(io: any, gameCode: string) {
+async function sendQuestion(io: any, gameCode: string) {
   try {
-    console.log(`[Game ${gameCode}] Preparando pregunta...`);
-    const questionData = GameplayService.prepareQuestion(gameCode);
+    console.log(`[Game ${gameCode}] ========== ENVIANDO PREGUNTA ==========`);
+    const questionData = await GameplayService.prepareQuestion(gameCode);
 
     if (!questionData) {
       // No hay más preguntas, terminar juego
-      console.log(`[Game ${gameCode}] No hay más preguntas, terminando juego...`);
-      endGame(io, gameCode);
+      console.log(`[Game ${gameCode}] ❌ No hay más preguntas, terminando juego...`);
+      await endGame(io, gameCode);
       return;
     }
 
-    console.log(`[Game ${gameCode}] Pregunta preparada:`, questionData.question.question_text);
+    console.log(`[Game ${gameCode}] ✅ Pregunta preparada #${questionData.questionNumber}/${questionData.totalQuestions}:`, questionData.questionText);
 
     // Ver quién está en el room
     const socketsInRoom = io.sockets.adapter.rooms.get(`game:${gameCode}`);
-    console.log(`[Game ${gameCode}] Sockets en room:`, socketsInRoom ? socketsInRoom.size : 0);
+    console.log(`[Game ${gameCode}] 🔌 Sockets conectados en room:`, socketsInRoom ? socketsInRoom.size : 0);
+
+    if (socketsInRoom && socketsInRoom.size > 0) {
+      console.log(`[Game ${gameCode}] 📡 Emitiendo 'question:new' al room game:${gameCode}`);
+    } else {
+      console.warn(`[Game ${gameCode}] ⚠️ NO HAY SOCKETS EN EL ROOM!`);
+    }
 
     // Broadcast pregunta a todos
     io.to(`game:${gameCode}`).emit('question:new', questionData);
-    console.log(`[Game ${gameCode}] Pregunta enviada a clientes`);
+    console.log(`[Game ${gameCode}] ✅ Evento 'question:new' emitido`);
 
     // Iniciar timer
     const timeLimit = questionData.timeLimit;
@@ -499,16 +737,13 @@ function sendQuestion(io: any, gameCode: string) {
           message: 'Se acabó el tiempo!',
         });
 
-        // Esperar 5 segundos para mostrar resultados
+        // Esperar 2 segundos para mostrar resultados (reducido para evitar congelación)
         setTimeout(() => {
           // Mostrar resultados y leaderboard
           showQuestionResults(io, gameCode);
-        }, 5000);
+        }, 2000);
       }
     }, 1000);
-
-    // Guardar timer para poder limpiarlo si es necesario
-    GameplayService.setGameTimer(gameCode, timerInterval as any);
 
   } catch (error) {
     console.error('Error sending question:', error);
@@ -523,25 +758,46 @@ function sendQuestion(io: any, gameCode: string) {
  */
 async function showQuestionResults(io: any, gameCode: string) {
   try {
+    console.log(`[Game ${gameCode}] ========== MOSTRANDO RESULTADOS ==========`);
     const leaderboard = await GameplayService.getLeaderboard(gameCode);
-    
+    console.log(`[Game ${gameCode}] 📊 Leaderboard obtenido:`, leaderboard.length, 'jugadores');
+
+    // **FIX**: Mapear de camelCase (backend) a snake_case (frontend)
+    const mappedLeaderboard = leaderboard.map(player => ({
+      rank: player.rank,
+      user_id: player.userId,  // camelCase → snake_case
+      nickname: player.nickname,
+      username: player.nickname, // Usar nickname como username por ahora
+      score: player.score,
+      correct_answers: player.correctAnswers,  // camelCase → snake_case
+      wrong_answers: player.wrongAnswers,  // camelCase → snake_case
+      combo_streak: player.comboStreak,  // camelCase → snake_case
+      highest_combo: player.highestCombo,  // camelCase → snake_case
+    }));
+
+    console.log(`[Game ${gameCode}] 📢 Emitiendo 'question:results' con TODOS los jugadores`);
     io.to(`game:${gameCode}`).emit('question:results', {
-      leaderboard: leaderboard.slice(0, 5), // Top 5
+      leaderboard: mappedLeaderboard, // Todos los jugadores (formato snake_case)
     });
 
-    // Esperar 3 segundos y avanzar a siguiente pregunta
-    setTimeout(() => {
-      const hasMore = GameplayService.advanceQuestion(gameCode);
-      
+    // Esperar 8 segundos para que vean ambas pantallas (3s explicación + 5s ranking)
+    console.log(`[Game ${gameCode}] ⏱️ Esperando 8s para que vean resultados...`);
+    setTimeout(async () => {
+      console.log(`[Game ${gameCode}] ⏩ Avanzando a siguiente pregunta...`);
+      const hasMore = await GameplayService.advanceQuestion(gameCode);
+      console.log(`[Game ${gameCode}] ❓ ¿Hay más preguntas?`, hasMore);
+
       if (hasMore) {
-        sendQuestion(io, gameCode);
+        console.log(`[Game ${gameCode}] ✅ Sí, enviando siguiente pregunta...`);
+        await sendQuestion(io, gameCode);
       } else {
-        endGame(io, gameCode);
+        console.log(`[Game ${gameCode}] 🏁 No, finalizando juego...`);
+        await endGame(io, gameCode);
       }
-    }, 3000);
+    }, 8000); // 8 segundos para sincronizar con frontend
 
   } catch (error) {
-    console.error('Error showing results:', error);
+    console.error(`[Game ${gameCode}] ❌ Error showing results:`, error);
   }
 }
 
@@ -552,8 +808,21 @@ async function endGame(io: any, gameCode: string) {
   try {
     const results = await GameplayService.endGame(gameCode);
 
+    // **FIX**: Mapear de camelCase (backend) a snake_case (frontend)
+    const mappedLeaderboard = results.leaderboard.map((player: any) => ({
+      rank: player.rank,
+      user_id: player.userId,
+      nickname: player.nickname,
+      username: player.nickname,
+      score: player.score,
+      correct_answers: player.correctAnswers,
+      wrong_answers: player.wrongAnswers,
+      combo_streak: player.comboStreak,
+      highest_combo: player.highestCombo,
+    }));
+
     io.to(`game:${gameCode}`).emit('game:finished', {
-      leaderboard: results.leaderboard,
+      leaderboard: mappedLeaderboard,
       totalPlayers: results.totalPlayers,
     });
 

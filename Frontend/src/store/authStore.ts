@@ -9,8 +9,10 @@ interface AuthState {
   refreshToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  
+  hasHydrated: boolean;
+
   // Actions
+  setHasHydrated: (state: boolean) => void;
   login: (credentials: LoginInput) => Promise<void>;
   register: (data: RegisterInput) => Promise<void>;
   logout: () => Promise<void>;
@@ -25,6 +27,9 @@ export const useAuthStore = create<AuthState>()(
       refreshToken: null,
       isAuthenticated: false,
       isLoading: false,
+      hasHydrated: false,
+
+      setHasHydrated: (state: boolean) => set({ hasHydrated: state }),
 
       login: async (credentials: LoginInput) => {
         set({ isLoading: true });
@@ -133,6 +138,10 @@ export const useAuthStore = create<AuthState>()(
         refreshToken: state.refreshToken,
         isAuthenticated: state.isAuthenticated,
       }),
+      onRehydrateStorage: () => (state) => {
+        console.log('[AuthStore] ✅ Hidratación completa:', state?.user ? `User ID: ${state.user.id}` : 'No user');
+        state?.setHasHydrated(true);
+      },
     }
   )
 );

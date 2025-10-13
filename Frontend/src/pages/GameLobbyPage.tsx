@@ -33,7 +33,7 @@ interface Player {
 export default function GameLobbyPage() {
   const { gameCode } = useParams<{ gameCode: string }>();
   const navigate = useNavigate();
-  const { accessToken, user } = useAuthStore();
+  const { accessToken, user, hasHydrated } = useAuthStore();
 
   const [game, setGame] = useState<any>(null);
   const [players, setPlayers] = useState<Player[]>([]);
@@ -42,8 +42,28 @@ export default function GameLobbyPage() {
   const [isCancelDialogOpen, setIsCancelDialogOpen] = useState(false);
   const [countdown, setCountdown] = useState<number | string | null>(null);
 
+
   useEffect(() => {
-    if (!gameCode || !accessToken) return;
+    // ✅ CRÍTICO: Esperar a que se complete la hidratación antes de continuar
+    if (!hasHydrated) {
+      console.log('[GameLobbyPage] ⏳ Esperando hidratación del authStore...');
+      return;
+    }
+
+    console.log('[GameLobbyPage] ✅ AuthStore hidratado, verificando datos...');
+
+    if (!gameCode || !accessToken) {
+      console.warn('[GameLobbyPage] Missing gameCode or accessToken');
+      return;
+    }
+
+    if (!user) {
+      console.error('[GameLobbyPage] ❌ User es null después de hidratación, redirigiendo a login');
+      navigate('/login');
+      return;
+    }
+
+    console.log('[GameLobbyPage] ✅ Todo OK, procediendo a setup del juego con User ID:', user.id);
 
     let mounted = true;
 
@@ -61,7 +81,22 @@ export default function GameLobbyPage() {
         if (!mounted) return;
 
         if (response.success) {
+          console.log('[GameLobbyPage] ✅ Unido al room del lobby');
+          console.log('[GameLobbyPage] Game data:', response.game);
+          console.log('[GameLobbyPage] Players:', response.players);
+
+          // **CRÍTICO**: Actualizar TANTO game como players
+          setGame(response.game);
           setPlayers(response.players || []);
+
+          // Si el juego ya está activo o iniciándose, redirigir
+          if (response.shouldRedirect) {
+            console.log('[GameLobbyPage] Juego ya activo, redirigiendo a gameplay...');
+            navigate(`/game/play/${gameCode}`);
+            return;
+          }
+
+          toast.success('Conectado al lobby', { icon: '✅', duration: 2000 });
         } else {
           console.error('Error joining game room:', response.message);
           toast.error(response.message);
@@ -86,11 +121,17 @@ export default function GameLobbyPage() {
       });
 
       socket.on('game:player-ready', (data) => {
-        setPlayers((prev) =>
-          prev.map(p =>
-            p.user_id === data.userId ? { ...p, isReady: true } : p
-          )
-        );
+        // Actualizar con la lista completa desde el servidor (fuente de verdad)
+        if (data.players) {
+          setPlayers(data.players);
+        } else {
+          // Fallback para compatibilidad
+          setPlayers((prev) =>
+            prev.map(p =>
+              p.user_id === data.userId ? { ...p, isReady: true } : p
+            )
+          );
+        }
       });
 
       socket.on('game:countdown', (data: { count: number | string }) => {
@@ -130,7 +171,7 @@ export default function GameLobbyPage() {
         socket.off('game:player-disconnected');
       }
     };
-  }, [gameCode, accessToken]);
+  }, [gameCode, accessToken, hasHydrated, user, navigate]);
 
   const loadGame = async () => {
     try {
@@ -188,20 +229,31 @@ export default function GameLobbyPage() {
     });
   };
 
-  if (loading) {
+  if (!hasHydrated || loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
-        <Loader2 className="w-12 h-12 animate-spin text-purple-400" />
+        <div className="text-center">
+          <Loader2 className="w-12 h-12 animate-spin text-purple-400 mx-auto mb-4" />
+          <p className="text-purple-300 font-gaming">
+            {!hasHydrated ? 'Cargando sesión...' : 'Cargando juego...'}
+          </p>
+        </div>
       </div>
     );
   }
 
   const readyCount = players.filter(p => p.isReady).length;
   const canStart = players.length >= 2;
-  const isTeacher = game?.teacher_id === user?.id;
+
+  // Asegurar que los tipos coincidan para la comparación
+  const userId = user?.id;
+  const teacherId = game?.teacher_id;
+  const isTeacher = userId !== undefined && teacherId !== undefined && Number(userId) === Number(teacherId);
+
   const currentPlayer = players.find(p => p.user_id === user?.id);
   const isPlayer = !!currentPlayer;
   const isPlayerReady = currentPlayer?.isReady || false;
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
@@ -365,32 +417,26 @@ export default function GameLobbyPage() {
                   </>
                 ) : isPlayer ? (
                   <>
-                    <Button
-                      onClick={handleReadyToggle}
-                      disabled={starting}
-                      className={`w-full h-14 text-lg ${
-                        isPlayerReady
-                          ? 'bg-gradient-to-r from-amber-600 to-orange-600 hover:from-orange-600 hover:to-amber-600'
-                          : 'bg-gradient-to-r from-green-600 to-emerald-600 hover:from-emerald-600 hover:to-green-600'
-                      }`}
-                    >
-                      {isPlayerReady ? (
-                        <>
-                          <CheckCircle className="mr-2 h-5 w-5" />
-                          ¡Estoy Listo!
-                        </>
-                      ) : (
-                        <>
-                          <Clock className="mr-2 h-5 w-5" />
-                          Marcar como Listo
-                        </>
-                      )}
-                    </Button>
+                    {!isPlayerReady ? (
+                      <Button
+                        onClick={handleReadyToggle}
+                        disabled={starting}
+                        className="w-full h-14 text-lg bg-gradient-to-r from-green-600 to-emerald-600 hover:from-emerald-600 hover:to-green-600"
+                      >
+                        <CheckCircle className="mr-2 h-5 w-5" />
+                        ¡Estoy Listo!
+                      </Button>
+                    ) : (
+                      <div className="w-full h-14 flex items-center justify-center bg-gradient-to-r from-green-600/20 to-emerald-600/20 border-2 border-green-500 rounded-lg">
+                        <CheckCircle className="mr-2 h-5 w-5 text-green-400" />
+                        <span className="text-lg text-green-400 font-gaming">¡LISTO!</span>
+                      </div>
+                    )}
 
                     <p className="text-xs text-center text-purple-300">
                       {isPlayerReady
-                        ? '✅ Listo - Esperando que el profesor inicie...'
-                        : '⏳ Marca listo cuando estés preparado'}
+                        ? '✅ Esperando que el profesor inicie el juego...'
+                        : '⏳ Haz clic cuando estés preparado'}
                     </p>
                   </>
                 ) : (

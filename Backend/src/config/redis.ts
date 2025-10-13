@@ -1,44 +1,69 @@
-import { createClient } from 'redis';
+import Redis from 'ioredis';
 
-let redisClient: any = null;
-let redisAvailable = false;
+/**
+ * Redis Client Configuration
+ * Usado para:
+ * - Game session state (temporal, TTL)
+ * - Leaderboards en tiempo real
+ * - Connection state recovery
+ */
 
-try {
-  redisClient = createClient({
-    url: process.env.REDIS_URL || 'redis://localhost:6379',
-  });
+const redisConfig = {
+  host: process.env.REDIS_HOST || 'localhost',
+  port: parseInt(process.env.REDIS_PORT || '6379', 10),
+  password: process.env.REDIS_PASSWORD || undefined,
+  db: parseInt(process.env.REDIS_DB || '0', 10),
+  retryStrategy: (times: number) => {
+    const delay = Math.min(times * 50, 2000);
+    return delay;
+  },
+  maxRetriesPerRequest: 3,
+  enableReadyCheck: true,
+  lazyConnect: false,
+};
 
-  redisClient.on('error', (err: any) => {
-    console.warn('⚠️ Redis not available:', err.message);
-    redisAvailable = false;
-  });
+// Cliente principal
+export const redis = new Redis(redisConfig);
 
-  redisClient.on('connect', () => {
-    console.info('✅ Redis connected successfully');
-    redisAvailable = true;
-  });
+// Cliente para Pub/Sub (necesita conexión separada)
+export const redisPub = new Redis(redisConfig);
+export const redisSub = new Redis(redisConfig);
 
-} catch (error) {
-  console.warn('⚠️ Redis client initialization failed');
-  redisAvailable = false;
+// Event handlers
+redis.on('connect', () => {
+  console.log('✅ Redis connected successfully');
+});
+
+redis.on('error', (error) => {
+  console.error('❌ Redis connection error:', error);
+});
+
+redis.on('ready', () => {
+  console.log('🚀 Redis ready to accept commands');
+});
+
+redis.on('close', () => {
+  console.warn('⚠️ Redis connection closed');
+});
+
+redisPub.on('connect', () => {
+  console.log('✅ Redis Pub connected');
+});
+
+redisSub.on('connect', () => {
+  console.log('✅ Redis Sub connected');
+});
+
+/**
+ * Graceful shutdown
+ */
+export async function closeRedis(): Promise<void> {
+  await Promise.all([
+    redis.quit(),
+    redisPub.quit(),
+    redisSub.quit(),
+  ]);
+  console.log('👋 Redis connections closed');
 }
 
-export const connectRedis = async () => {
-  if (redisClient && !redisClient.isOpen && redisAvailable) {
-    try {
-      await redisClient.connect();
-    } catch (error) {
-      console.warn('⚠️ Redis connection failed');
-      redisAvailable = false;
-    }
-  }
-};
-
-export const getRedisClient = () => {
-  return redisAvailable ? redisClient : null;
-};
-
-export const isRedisAvailable = () => redisAvailable;
-
-export default redisClient;
-
+export default redis;

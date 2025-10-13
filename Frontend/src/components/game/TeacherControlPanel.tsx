@@ -186,7 +186,7 @@ export default function TeacherControlPanel({
               <Card className="bg-slate-800 border-2 border-yellow-500 p-6">
                 <h3 className="text-xl font-gaming text-white mb-4 flex items-center gap-2">
                   <Trophy className="w-5 h-5 text-yellow-400" />
-                  Top 5
+                  Top {Math.min(5, leaderboard.length)}
                 </h3>
                 <div className="space-y-3 max-h-[600px] overflow-y-auto">
                   {leaderboard.slice(0, 5).map((player: any, index: number) => (

@@ -1,4 +1,6 @@
 import { motion, AnimatePresence } from 'framer-motion';
+import { Card } from '@/components/ui/card';
+import { Zap } from 'lucide-react';
 
 interface CountdownOverlayProps {
   count: number | string;
@@ -6,6 +8,8 @@ interface CountdownOverlayProps {
 }
 
 export default function CountdownOverlay({ count, show }: CountdownOverlayProps) {
+  const isStarting = count === 'starting';
+
   return (
     <AnimatePresence>
       {show && (
@@ -13,70 +17,113 @@ export default function CountdownOverlay({ count, show }: CountdownOverlayProps)
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4"
         >
-          <motion.div
-            key={count}
-            initial={{ scale: 0.5, opacity: 0, rotate: -180 }}
-            animate={{ scale: 1, opacity: 1, rotate: 0 }}
-            exit={{ scale: 1.5, opacity: 0 }}
-            transition={{
-              duration: 0.8,
-              ease: [0.43, 0.13, 0.23, 0.96]
-            }}
-            className="relative"
-          >
-            {/* Glow effect */}
-            <div className="absolute inset-0 blur-3xl">
-              <div className="w-64 h-64 bg-gradient-to-br from-purple-500 via-pink-500 to-cyan-500 rounded-full animate-pulse" />
+          <Card className="bg-slate-800/95 border-4 border-cyan-500 p-8 md:p-12 max-w-md w-full relative overflow-hidden">
+            {/* Retro grid background */}
+            <div className="absolute inset-0 opacity-5">
+              <div className="absolute inset-0" style={{
+                backgroundImage: 'linear-gradient(cyan 1px, transparent 1px), linear-gradient(90deg, cyan 1px, transparent 1px)',
+                backgroundSize: '20px 20px'
+              }} />
             </div>
-            
-            {/* Countdown number */}
-            <motion.div
-              className="relative text-[20rem] font-gaming font-bold text-transparent bg-clip-text bg-gradient-to-br from-cyan-400 via-purple-500 to-pink-500"
-              animate={{
-                textShadow: [
-                  '0 0 20px rgba(139, 92, 246, 0.8)',
-                  '0 0 60px rgba(139, 92, 246, 1)',
-                  '0 0 20px rgba(139, 92, 246, 0.8)',
-                ],
-              }}
-              transition={{
-                duration: 0.8,
-                repeat: Infinity,
-                ease: 'easeInOut',
-              }}
-            >
-              {count}
-            </motion.div>
 
-            {/* Rings */}
             <motion.div
-              className="absolute inset-0 border-8 border-purple-500 rounded-full"
-              animate={{
-                scale: [1, 1.5, 2],
-                opacity: [1, 0.5, 0],
-              }}
+              key={count}
+              initial={{ scale: 0.5, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.5, opacity: 0 }}
               transition={{
-                duration: 1,
-                repeat: Infinity,
-                ease: 'easeOut',
+                duration: 0.3,
+                ease: [0.43, 0.13, 0.23, 0.96]
               }}
-            />
-            <motion.div
-              className="absolute inset-0 border-8 border-cyan-500 rounded-full"
-              animate={{
-                scale: [1, 1.5, 2],
-                opacity: [1, 0.5, 0],
-              }}
-              transition={{
-                duration: 1,
-                repeat: Infinity,
-                ease: 'easeOut',
-                delay: 0.2,
-              }}
-            />
-          </motion.div>
+              className="relative text-center"
+            >
+              {isStarting ? (
+                <>
+                  {/* Icon para "starting" */}
+                  <motion.div
+                    animate={{
+                      rotate: [0, 360],
+                      scale: [1, 1.2, 1]
+                    }}
+                    transition={{
+                      duration: 2,
+                      repeat: Infinity,
+                      ease: 'linear'
+                    }}
+                    className="mb-6"
+                  >
+                    <Zap className="w-20 h-20 text-yellow-400 mx-auto" />
+                  </motion.div>
+
+                  <h2 className="text-4xl md:text-5xl font-gaming text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 mb-4 tracking-wider">
+                    ¡PREPARADOS!
+                  </h2>
+
+                  <motion.div
+                    className="text-2xl text-cyan-400 font-gaming"
+                    animate={{ opacity: [0.5, 1, 0.5] }}
+                    transition={{ duration: 1.5, repeat: Infinity }}
+                  >
+                    El juego comienza...
+                  </motion.div>
+                </>
+              ) : (
+                <>
+                  {/* Contador numérico */}
+                  <motion.div
+                    animate={{
+                      scale: [1, 1.1, 1],
+                    }}
+                    transition={{
+                      duration: 0.5,
+                      repeat: Infinity,
+                      repeatType: 'reverse'
+                    }}
+                    className="mb-4"
+                  >
+                    <div className="text-8xl md:text-9xl font-gaming font-bold text-transparent bg-clip-text bg-gradient-to-br from-cyan-400 via-purple-500 to-pink-500 leading-none">
+                      {count}
+                    </div>
+                  </motion.div>
+
+                  {/* Pixelated border decoration */}
+                  <div className="flex justify-center gap-2 mt-6">
+                    {[...Array(5)].map((_, i) => (
+                      <motion.div
+                        key={i}
+                        className="w-3 h-3 bg-cyan-400"
+                        animate={{
+                          opacity: [0.3, 1, 0.3],
+                          scale: [1, 1.5, 1]
+                        }}
+                        transition={{
+                          duration: 0.8,
+                          repeat: Infinity,
+                          delay: i * 0.1
+                        }}
+                      />
+                    ))}
+                  </div>
+                </>
+              )}
+
+              {/* Scanline effect */}
+              <motion.div
+                className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-cyan-400 to-transparent"
+                animate={{
+                  top: ['0%', '100%'],
+                  opacity: [0.3, 0.7, 0.3]
+                }}
+                transition={{
+                  duration: 2,
+                  repeat: Infinity,
+                  ease: 'linear'
+                }}
+              />
+            </motion.div>
+          </Card>
         </motion.div>
       )}
     </AnimatePresence>

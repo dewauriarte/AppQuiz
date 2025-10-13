@@ -196,7 +196,14 @@ export class AuthService {
       throw new UnauthorizedError('User not found');
     }
 
-    return user;
+    // ✅ CRÍTICO: Mapear user_id a id para consistencia con frontend
+    return {
+      id: user.user_id,
+      username: user.username,
+      email: user.email,
+      role: user.role,
+      displayName: user.display_name,
+    };
   }
 
   async logout(userId: number, refreshToken: string) {
@@ -250,7 +257,14 @@ export class AuthService {
       },
     });
 
-    return updatedUser;
+    // ✅ Mapear user_id a id para consistencia
+    return {
+      id: updatedUser.user_id,
+      username: updatedUser.username,
+      email: updatedUser.email,
+      role: updatedUser.role,
+      displayName: updatedUser.display_name,
+    };
   }
 
   async forgotPassword(email: string) {
@@ -293,7 +307,19 @@ export class AuthService {
       },
     });
 
-    return user;
+    if (!user) {
+      return null;
+    }
+
+    // ✅ Mapear user_id a id para consistencia
+    return {
+      id: user.user_id,
+      username: user.username,
+      displayName: user.display_name,
+      email: user.email,
+      role: user.role,
+      createdAt: user.created_at,
+    };
   }
 
   private calculateAge(birthDate: Date): number {

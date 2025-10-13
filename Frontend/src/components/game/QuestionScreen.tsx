@@ -78,7 +78,7 @@ export default function QuestionScreen({
         className="flex-1 flex flex-col items-center justify-center max-w-6xl mx-auto w-full"
       >
         <Card className="bg-slate-800 border-2 border-purple-500 p-8 mb-8 w-full">
-          <h2 className="text-2xl md:text-4xl font-bold text-white text-center leading-relaxed">
+          <h2 className="text-2xl md:text-4xl font-bold text-white text-center leading-relaxed break-words">
             {question.question.question_text}
           </h2>
         </Card>
@@ -102,17 +102,21 @@ export default function QuestionScreen({
                   onClick={() => onSelectAnswer(option.option_id)}
                   disabled={selectedOption !== null}
                   className={`
-                    w-full h-auto min-h-[100px] p-6 text-xl md:text-2xl font-bold
+                    w-full min-h-[140px] p-6 font-bold
                     ${color.bg} ${color.hover} border-4 ${color.border}
                     ${isSelected ? 'ring-4 ring-white' : ''}
-                    disabled:opacity-70 transition-all
+                    disabled:opacity-70 transition-all flex items-center justify-start
                   `}
                 >
-                  <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-full bg-white/20 flex items-center justify-center text-2xl">
+                  <div className="flex items-start gap-4 w-full">
+                    <div className="w-10 h-10 flex-shrink-0 rounded-full bg-white/20 flex items-center justify-center text-2xl">
                       {String.fromCharCode(65 + index)}
                     </div>
-                    <span className="flex-1 text-left">{option.option_text}</span>
+                    <span className={`flex-1 text-left break-words whitespace-normal leading-relaxed ${
+                      option.option_text.length > 80 ? 'text-base md:text-lg' : 'text-xl md:text-2xl'
+                    }`}>
+                      {option.option_text}
+                    </span>
                   </div>
                 </Button>
               </motion.div>

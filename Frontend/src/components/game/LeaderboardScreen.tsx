@@ -41,7 +41,9 @@ export default function LeaderboardScreen({
             <h1 className="text-6xl font-gaming text-white">RANKING</h1>
             <Trophy className="w-16 h-16 text-yellow-400" />
           </div>
-          <p className="text-xl text-purple-300">Top 5 Jugadores</p>
+          <p className="text-xl text-purple-300">
+            Top {Math.min(5, leaderboard.length)} {leaderboard.length === 1 ? 'Jugador' : 'Jugadores'}
+          </p>
         </motion.div>
 
         {/* Leaderboard */}
@@ -59,7 +61,7 @@ export default function LeaderboardScreen({
               >
                 <Card
                   className={`
-                    p-6 border-4
+                    p-6 border-4 min-h-[120px]
                     ${isCurrentUser
                       ? 'bg-gradient-to-r from-purple-900 to-indigo-900 border-purple-400 ring-4 ring-purple-500'
                       : 'bg-slate-800 border-slate-600'

@@ -19,6 +19,8 @@ import CreateGamePage from '@/pages/CreateGamePage';
 import GameLobbyPage from '@/pages/GameLobbyPage';
 import JoinGamePage from '@/pages/JoinGamePage';
 import GamePlayPage from '@/pages/GamePlayPage';
+import ProfilePage from '@/pages/ProfilePage';
+import LeaderboardPage from '@/pages/LeaderboardPage';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
 function App() {
@@ -157,6 +159,22 @@ function App() {
         element={
           <ProtectedRoute>
             <GamePlayPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/profile"
+        element={
+          <ProtectedRoute>
+            <ProfilePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/leaderboard"
+        element={
+          <ProtectedRoute>
+            <LeaderboardPage />
           </ProtectedRoute>
         }
       />

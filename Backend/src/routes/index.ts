@@ -6,6 +6,8 @@ import questionRoutes from './question.routes';
 import aiQuestionSetRoutes from './aiQuestionSet.routes';
 import classListRoutes from './classList.routes';
 import gameRoutes from './game.routes';
+import userRoutes from './user.routes';
+import leaderboardRoutes from './leaderboard.routes';
 
 const router = Router();
 
@@ -16,6 +18,8 @@ router.use('/questions', questionRoutes);
 router.use('/ai-question-sets', aiQuestionSetRoutes);
 router.use('/lists', classListRoutes);
 router.use('/games', gameRoutes);
+router.use('/users', userRoutes);
+router.use('/leaderboards', leaderboardRoutes);
 
 // Health check
 router.get('/health', (_req, res) => {

@@ -1,7 +1,12 @@
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Award, Target, Zap, TrendingUp, ArrowRight, Coins, Gem, Star } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import Confetti from 'react-confetti';
+import { useWindowSize } from 'react-use';
+import LevelUpModal from './LevelUpModal';
+import { useCountUp } from '@/hooks/useCountUp';
 
 interface FinalResultsScreenProps {
   results: {
@@ -20,6 +25,15 @@ interface FinalResultsScreenProps {
         coins: number;
         gems: number;
       };
+      levelUp?: {
+        oldLevel: number;
+        newLevel: number;
+        rewards: {
+          coins: number;
+          gems: number;
+          items: Array<{ itemId: number; quantity: number }>;
+        };
+      };
     }>;
     totalPlayers: number;
   };
@@ -32,26 +46,82 @@ export default function FinalResultsScreen({
   currentUserId,
   onContinue,
 }: FinalResultsScreenProps) {
+  const { width, height } = useWindowSize();
   const currentPlayer = results.leaderboard.find(p => p.user_id === currentUserId);
   const totalQuestions = currentPlayer ? currentPlayer.correct_answers + currentPlayer.wrong_answers : 0;
   const accuracy = totalQuestions > 0 ? (currentPlayer!.correct_answers / totalQuestions) * 100 : 0;
 
   const topThree = results.leaderboard.slice(0, 3);
+  const isTopThree = currentPlayer && currentPlayer.rank <= 3;
+
+  // Level up modal state
+  const [showLevelUpModal, setShowLevelUpModal] = useState(false);
+
+  // Contadores animados para rewards
+  const xpCount = useCountUp(currentPlayer?.rewards?.xp || 0, 2000);
+  const coinsCount = useCountUp(currentPlayer?.rewards?.coins || 0, 2000);
+  const gemsCount = useCountUp(currentPlayer?.rewards?.gems || 0, 2000);
+
+  const handleContinue = () => {
+    if (currentPlayer?.levelUp && !showLevelUpModal) {
+      setShowLevelUpModal(true);
+    } else {
+      onContinue();
+    }
+  };
 
   return (
-    <div className="min-h-screen p-4 md:p-8 overflow-y-auto">
-      <div className="max-w-6xl mx-auto">
-        {/* Title */}
-        <motion.div
-          initial={{ y: -50, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          className="text-center mb-12"
-        >
-          <h1 className="text-7xl font-gaming text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 mb-4">
-            ¡JUEGO TERMINADO!
-          </h1>
-          <p className="text-2xl text-purple-300">{results.totalPlayers} jugadores compitieron</p>
-        </motion.div>
+    <>
+      {/* Confetti for top 3 */}
+      {isTopThree && (
+        <Confetti
+          width={width}
+          height={height}
+          recycle={false}
+          numberOfPieces={500}
+          gravity={0.3}
+          colors={['#FFD700', '#FFA500', '#FF6347', '#FF1493', '#9370DB']}
+        />
+      )}
+
+      {/* Level Up Modal */}
+      {currentPlayer?.levelUp && (
+        <LevelUpModal
+          isOpen={showLevelUpModal}
+          levelUpData={currentPlayer.levelUp}
+          onClose={onContinue}
+        />
+      )}
+
+      <div className="min-h-screen p-4 md:p-8 overflow-y-auto">
+        <div className="max-w-6xl mx-auto">
+          {/* Victory Badge for Top 3 */}
+          {isTopThree && (
+            <motion.div
+              initial={{ scale: 0, rotate: -180 }}
+              animate={{ scale: 1, rotate: 0 }}
+              transition={{ type: 'spring', delay: 0.2 }}
+              className="text-center mb-6"
+            >
+              <div className="inline-block bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 text-white px-8 py-4 rounded-full font-gaming text-3xl shadow-2xl border-4 border-yellow-300">
+                {currentPlayer?.rank === 1 && '👑 ¡GANADOR! 👑'}
+                {currentPlayer?.rank === 2 && '🥈 ¡2DO LUGAR! 🥈'}
+                {currentPlayer?.rank === 3 && '🥉 ¡3ER LUGAR! 🥉'}
+              </div>
+            </motion.div>
+          )}
+
+          {/* Title */}
+          <motion.div
+            initial={{ y: -50, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            className="text-center mb-12"
+          >
+            <h1 className="text-7xl font-gaming text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 mb-4">
+              ¡JUEGO TERMINADO!
+            </h1>
+            <p className="text-2xl text-purple-300">{results.totalPlayers} jugadores compitieron</p>
+          </motion.div>
 
         {/* Podium - Top 3 */}
         {topThree.length >= 3 && (
@@ -160,31 +230,62 @@ export default function FinalResultsScreen({
             className="mb-8"
           >
             <Card className="bg-gradient-to-br from-yellow-900/50 to-orange-900/50 border-4 border-yellow-500 p-6">
-              <h3 className="text-2xl font-gaming text-yellow-400 mb-4 text-center">
-                ¡Recompensas Obtenidas!
+              <h3 className="text-3xl font-gaming text-yellow-400 mb-6 text-center">
+                🎁 ¡Recompensas Obtenidas! 🎁
               </h3>
               <div className="grid grid-cols-3 gap-4">
                 {/* XP */}
-                <div className="bg-slate-800/70 rounded-lg p-4 text-center border-2 border-blue-500">
-                  <Star className="w-8 h-8 text-blue-400 mx-auto mb-2" />
-                  <div className="text-3xl font-gaming text-white">+{currentPlayer.rewards.xp}</div>
-                  <div className="text-sm text-gray-400">XP</div>
-                </div>
+                <motion.div
+                  initial={{ scale: 0, rotate: -180 }}
+                  animate={{ scale: 1, rotate: 0 }}
+                  transition={{ type: 'spring', delay: 1.0 }}
+                  className="bg-gradient-to-br from-blue-600 to-cyan-600 rounded-xl p-6 text-center border-3 border-blue-300 shadow-xl"
+                >
+                  <Star className="w-12 h-12 text-white mx-auto mb-3" />
+                  <div className="text-4xl font-gaming text-white mb-1">+{xpCount.toLocaleString()}</div>
+                  <div className="text-base text-blue-100 font-semibold">XP</div>
+                </motion.div>
 
                 {/* Coins */}
-                <div className="bg-slate-800/70 rounded-lg p-4 text-center border-2 border-yellow-500">
-                  <Coins className="w-8 h-8 text-yellow-400 mx-auto mb-2" />
-                  <div className="text-3xl font-gaming text-white">+{currentPlayer.rewards.coins}</div>
-                  <div className="text-sm text-gray-400">Monedas</div>
-                </div>
+                <motion.div
+                  initial={{ scale: 0, rotate: 180 }}
+                  animate={{ scale: 1, rotate: 0 }}
+                  transition={{ type: 'spring', delay: 1.1 }}
+                  className="bg-gradient-to-br from-yellow-600 to-orange-600 rounded-xl p-6 text-center border-3 border-yellow-300 shadow-xl"
+                >
+                  <Coins className="w-12 h-12 text-white mx-auto mb-3" />
+                  <div className="text-4xl font-gaming text-white mb-1">+{coinsCount.toLocaleString()}</div>
+                  <div className="text-base text-yellow-100 font-semibold">Monedas</div>
+                </motion.div>
 
                 {/* Gems */}
-                <div className="bg-slate-800/70 rounded-lg p-4 text-center border-2 border-purple-500">
-                  <Gem className="w-8 h-8 text-purple-400 mx-auto mb-2" />
-                  <div className="text-3xl font-gaming text-white">+{currentPlayer.rewards.gems}</div>
-                  <div className="text-sm text-gray-400">Gemas</div>
-                </div>
+                {currentPlayer.rewards.gems > 0 && (
+                  <motion.div
+                    initial={{ scale: 0, rotate: -180 }}
+                    animate={{ scale: 1, rotate: 0 }}
+                    transition={{ type: 'spring', delay: 1.2 }}
+                    className="bg-gradient-to-br from-purple-600 to-pink-600 rounded-xl p-6 text-center border-3 border-purple-300 shadow-xl"
+                  >
+                    <Gem className="w-12 h-12 text-white mx-auto mb-3" />
+                    <div className="text-4xl font-gaming text-white mb-1">+{gemsCount.toLocaleString()}</div>
+                    <div className="text-base text-purple-100 font-semibold">Gemas</div>
+                  </motion.div>
+                )}
               </div>
+
+              {/* Level up indicator */}
+              {currentPlayer.levelUp && (
+                <motion.div
+                  initial={{ scale: 0 }}
+                  animate={{ scale: 1 }}
+                  transition={{ type: 'spring', delay: 1.5 }}
+                  className="mt-6 text-center"
+                >
+                  <div className="inline-block bg-gradient-to-r from-green-600 to-emerald-600 text-white px-6 py-3 rounded-full font-gaming text-xl shadow-lg border-3 border-green-300 animate-pulse">
+                    ⬆️ ¡Subiste de nivel! ⬆️
+                  </div>
+                </motion.div>
+              )}
             </Card>
           </motion.div>
         )}
@@ -239,15 +340,16 @@ export default function FinalResultsScreen({
           className="text-center"
         >
           <Button
-            onClick={onContinue}
+            onClick={handleContinue}
             className="bg-gradient-to-r from-green-600 to-emerald-600 hover:from-emerald-600 hover:to-green-600 text-white px-12 py-6 text-2xl font-gaming"
           >
-            Continuar
+            {currentPlayer?.levelUp && !showLevelUpModal ? 'Ver Level Up' : 'Continuar'}
             <ArrowRight className="ml-2 w-6 h-6" />
           </Button>
         </motion.div>
       </div>
     </div>
+    </>
   );
 }
 

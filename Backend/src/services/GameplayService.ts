@@ -2,6 +2,7 @@ import prisma from '@config/database';
 import { GameStatus, Prisma } from '@prisma/client';
 import { calculatePoints, calculateRewards, shuffleArray, ScoreCalculation } from '@utils/scoring';
 import RedisGameSessionService, { PlayerState, GameSessionState } from './RedisGameSessionService';
+import { grantRewards } from './RewardsService';
 
 /**
  * Gameplay Service - Gestión del flujo de juego
@@ -437,7 +438,9 @@ export class GameplayService {
     const leaderboard = await RedisGameSessionService.getLeaderboard(gameCode);
     const totalPlayers = leaderboard.length;
 
-    // Guardar resultados y otorgar recompensas
+    // Guardar resultados y otorgar recompensas usando RewardsService
+    const leaderboardWithRewards = [];
+
     for (const player of leaderboard) {
       const rewards = calculateRewards(player.rank, totalPlayers);
 
@@ -454,7 +457,14 @@ export class GameplayService {
       const totalQuestions = gameSession.totalQuestions;
       const accuracy = totalQuestions > 0 ? (player.correctAnswers / totalQuestions) * 100 : 0;
 
-      // Guardar en game_results
+      // Otorgar recompensas usando RewardsService (maneja XP, coins, gems, level ups)
+      const rewardResult = await grantRewards(player.userId, {
+        xp: rewards.xp,
+        coins: rewards.coins,
+        gems: rewards.gems,
+      });
+
+      // Guardar en game_results con las recompensas otorgadas
       await prisma.game_results.create({
         data: {
           game_id: gameSession.gameId,
@@ -476,46 +486,41 @@ export class GameplayService {
         },
       });
 
-      // Otorgar recompensas al usuario
-      await prisma.user_profiles.upsert({
+      // Actualizar stats de user_profiles (total_games_played, total_games_won, etc)
+      const currentProfile = await prisma.user_profiles.findUnique({
         where: { user_id: player.userId },
-        update: {
-          total_xp: { increment: rewards.xp },
-          current_xp: { increment: rewards.xp },
-          total_games_played: { increment: 1 },
-          total_games_won: { increment: player.rank === 1 ? 1 : 0 },
-          total_quizzes_completed: { increment: 1 },
-          total_questions_answered: { increment: totalQuestions },
-          total_correct_answers: { increment: player.correctAnswers },
-        },
-        create: {
-          user_id: player.userId,
-          total_xp: rewards.xp,
-          current_xp: rewards.xp,
-          total_games_played: 1,
-          total_games_won: player.rank === 1 ? 1 : 0,
-          total_quizzes_completed: 1,
-          total_questions_answered: totalQuestions,
-          total_correct_answers: player.correctAnswers,
-        },
       });
 
-      // Actualizar monedas
-      await prisma.user_currencies.upsert({
-        where: { user_id: player.userId },
-        update: {
-          coins: { increment: rewards.coins },
-          gems: { increment: rewards.gems },
-          total_coins_earned: { increment: rewards.coins },
-          total_gems_earned: { increment: rewards.gems },
-        },
-        create: {
-          user_id: player.userId,
+      if (currentProfile) {
+        // Calcular nueva average_accuracy
+        const totalCorrectAnswers = currentProfile.total_correct_answers + player.correctAnswers;
+        const totalQuestionsAnswered = currentProfile.total_questions_answered + totalQuestions;
+        const newAccuracy = totalQuestionsAnswered > 0 
+          ? (totalCorrectAnswers / totalQuestionsAnswered) * 100 
+          : 0;
+
+        await prisma.user_profiles.update({
+          where: { user_id: player.userId },
+          data: {
+            total_games_played: { increment: 1 },
+            total_games_won: { increment: player.rank === 1 ? 1 : 0 },
+            total_quizzes_completed: { increment: 1 },
+            total_questions_answered: { increment: totalQuestions },
+            total_correct_answers: { increment: player.correctAnswers },
+            average_accuracy: new Prisma.Decimal(newAccuracy.toFixed(2)),
+          },
+        });
+      }
+
+      // Agregar recompensas al leaderboard response
+      leaderboardWithRewards.push({
+        ...player,
+        rewards: {
+          xp: rewards.xp,
           coins: rewards.coins,
           gems: rewards.gems,
-          total_coins_earned: rewards.coins,
-          total_gems_earned: rewards.gems,
         },
+        levelUp: rewardResult.levelUp,
       });
     }
 
@@ -530,7 +535,7 @@ export class GameplayService {
     // Limpiar sesión de Redis
     await RedisGameSessionService.cleanupGameSession(gameCode);
 
-    return { leaderboard, totalPlayers };
+    return { leaderboard: leaderboardWithRewards, totalPlayers };
   }
 
   /**

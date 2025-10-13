@@ -605,7 +605,7 @@ export function registerGameHandlers(io: Server): void {
 
         // Actualizar leaderboard
         const leaderboard = await GameplayService.getLeaderboard(gameCode);
-        
+
         // **FIX**: Mapear de camelCase (backend) a snake_case (frontend)
         const mappedLeaderboard = leaderboard.map(player => ({
           rank: player.rank,
@@ -618,8 +618,14 @@ export function registerGameHandlers(io: Server): void {
           combo_streak: player.comboStreak,
           highest_combo: player.highestCombo,
         }));
-        
+
         io.to(`game:${gameCode}`).emit('leaderboard:update', { leaderboard: mappedLeaderboard });
+
+        // **NUEVO**: Emitir evento para actualizar contador del profesor
+        io.to(`game:${gameCode}`).emit('answer:received', {
+          userId: user.userId,
+          username: user.username,
+        });
 
       } catch (error: any) {
         console.error('Error processing answer:', error);

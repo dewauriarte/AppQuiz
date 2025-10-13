@@ -62,16 +62,111 @@ export default function IntermediateRankingScreen({
   const estimatedXP = currentPlayer ? Math.floor(currentPlayer.score * 0.03) : 0;
   const estimatedCoins = currentPlayer ? Math.floor(currentPlayer.score * 0.015) : 0;
 
-  // **PROTECCIÓN**: Si no se encuentra el jugador, mostrar mensaje de error
+  // **MODO PROFESOR**: Si no se encuentra el jugador (profesor), mostrar ranking general
   if (!currentPlayer) {
-    console.error('[IntermediateRanking] ❌ ERROR: No se encontró el jugador actual en el leaderboard!');
     return (
-      <div className="min-h-screen flex items-center justify-center p-4">
-        <div className="text-center">
-          <p className="text-red-400 text-2xl">⚠️ Error: No se encontró tu información en el ranking</p>
-          <p className="text-gray-400 mt-2">User ID: {currentUserId}</p>
-          <p className="text-gray-400">Jugadores en leaderboard: {leaderboard.length}</p>
-        </div>
+      <div className="fixed inset-0 flex items-center justify-center p-4 bg-gradient-to-br from-slate-900 via-purple-900/20 to-slate-900 overflow-y-auto">
+        <motion.div
+          initial={{ scale: 0.8, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ duration: 0.5 }}
+          className="w-full max-w-4xl my-auto"
+        >
+          <Card className="bg-gradient-to-br from-slate-800 to-slate-900 border-4 border-yellow-500 p-6 md:p-10 shadow-2xl">
+            {/* Título */}
+            <motion.div
+              initial={{ y: -20, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              className="text-center mb-8"
+            >
+              <div className="flex items-center justify-center gap-3 mb-4">
+                <Trophy className="w-12 h-12 md:w-16 md:h-16 text-yellow-400 animate-pulse" />
+                <h1 className="text-4xl md:text-6xl font-gaming text-white">RANKING</h1>
+                <Trophy className="w-12 h-12 md:w-16 md:h-16 text-yellow-400 animate-pulse" />
+              </div>
+              <p className="text-lg md:text-xl text-purple-300">Top {Math.min(10, leaderboard.length)} Jugadores</p>
+            </motion.div>
+
+            {/* Leaderboard */}
+            <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+              {leaderboard.slice(0, 10).map((player, index) => {
+                const getMedalStyle = (rank: number) => {
+                  switch (rank) {
+                    case 1:
+                      return {
+                        bg: 'bg-gradient-to-br from-yellow-400 to-yellow-600',
+                        border: 'border-yellow-500',
+                        shadow: 'shadow-xl shadow-yellow-500/50',
+                      };
+                    case 2:
+                      return {
+                        bg: 'bg-gradient-to-br from-gray-300 to-gray-500',
+                        border: 'border-gray-400',
+                        shadow: 'shadow-xl shadow-gray-400/50',
+                      };
+                    case 3:
+                      return {
+                        bg: 'bg-gradient-to-br from-orange-400 to-orange-600',
+                        border: 'border-orange-500',
+                        shadow: 'shadow-xl shadow-orange-500/50',
+                      };
+                    default:
+                      return {
+                        bg: 'bg-slate-600',
+                        border: 'border-slate-500',
+                        shadow: '',
+                      };
+                  }
+                };
+
+                const medalStyle = getMedalStyle(player.rank);
+
+                return (
+                  <motion.div
+                    key={player.user_id}
+                    initial={{ x: -100, opacity: 0 }}
+                    animate={{ x: 0, opacity: 1 }}
+                    transition={{ delay: index * 0.1, type: 'spring' }}
+                  >
+                    <Card className={`bg-slate-700 p-4 md:p-5 ${player.rank <= 3 ? 'border-3 ' + medalStyle.border : 'border-2 border-slate-600'}`}>
+                      <div className="flex items-center gap-3 md:gap-4">
+                        <div className={`w-14 h-14 md:w-16 md:h-16 ${medalStyle.bg} ${medalStyle.shadow} rounded-full flex items-center justify-center font-gaming text-white border-3 ${medalStyle.border} text-xl md:text-2xl`}>
+                          {player.rank}
+                        </div>
+                        <div className="flex-1">
+                          <div className="text-lg md:text-xl font-bold text-white">
+                            {player.nickname || player.username}
+                          </div>
+                          <div className="text-sm text-gray-400 flex items-center gap-3">
+                            <span>✓ {player.correct_answers} correctas</span>
+                            {player.combo_streak > 0 && (
+                              <span className="text-orange-400">
+                                🔥 Combo x{player.combo_streak}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="text-2xl md:text-3xl font-gaming text-yellow-400">
+                          {player.score.toLocaleString()}
+                        </div>
+                      </div>
+                    </Card>
+                  </motion.div>
+                );
+              })}
+            </div>
+
+            {/* Mensaje siguiente pregunta */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: [0.5, 1, 0.5] }}
+              transition={{ duration: 2, repeat: Infinity }}
+              className="text-center mt-8 text-cyan-400 text-xl font-gaming"
+            >
+              Siguiente pregunta en breve...
+            </motion.div>
+          </Card>
+        </motion.div>
       </div>
     );
   }

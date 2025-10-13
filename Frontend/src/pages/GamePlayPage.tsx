@@ -220,26 +220,38 @@ export default function GamePlayPage() {
     });
 
     socket.on('question:results', (data: { leaderboard: LeaderboardPlayer[] }) => {
-      
+
       // Guardar posición anterior antes de actualizar
       const currentPlayerInLeaderboard = leaderboard.find(p => p.user_id === user?.id);
       if (currentPlayerInLeaderboard) {
         setPreviousRank(currentPlayerInLeaderboard.rank);
-      } else {
       }
-      
+
       setLeaderboard(data.leaderboard);
-      
-      // **FLUJO DE DOS PANTALLAS**:
-      // 1. Si el estudiante contestó: mostrar resultado individual (2-3s)
-      // 2. Luego mostrar intermediate-ranking (durante el periodo de congelación del backend)
+
+      // **PROFESOR**: Ir directo a intermediate-ranking
+      if (isTeacher) {
+        setPhase('intermediate-ranking');
+
+        // Después de 8s, volver a waiting (sincronizado con backend)
+        questionResultsTimeoutRef.current = setTimeout(() => {
+          setPhase('waiting');
+          setAnswersReceived(0); // Reset contador
+          questionResultsTimeoutRef.current = null;
+        }, 8000);
+        return;
+      }
+
+      // **ESTUDIANTES**: FLUJO DE DOS PANTALLAS
+      // 1. Si contestó: mostrar resultado individual (3s)
+      // 2. Luego mostrar intermediate-ranking (5s)
       // 3. Finalmente volver a waiting
-      
+
       // Solo hacer transición si ya mostró su resultado individual
       if (answerResultRef.current) {
         questionResultsTimeoutRef.current = setTimeout(() => {
           setPhase('intermediate-ranking');
-          
+
           // Después de 5s más, volver a waiting
           questionResultsTimeoutRef.current = setTimeout(() => {
             setPhase('waiting');
@@ -248,7 +260,7 @@ export default function GamePlayPage() {
             setSelectedOption(null);
             questionResultsTimeoutRef.current = null;
           }, 5000); // 5 segundos para ver ranking completo y estadísticas
-          
+
         }, 3000); // 3 segundos para leer la explicación
       } else {
         // Si no contestó (ya está en intermediate-ranking desde timeout), solo volver a waiting después
@@ -266,6 +278,14 @@ export default function GamePlayPage() {
       setLeaderboard(data.leaderboard);
       // Actualizar total de jugadores basado en leaderboard
       setTotalPlayers(data.leaderboard.length);
+    });
+
+    // **NUEVO**: Escuchar cuando alguien responde (para actualizar contador del profesor)
+    socket.on('answer:received', () => {
+      // Solo incrementar si es el profesor (para no duplicar contador en estudiantes)
+      if (isTeacher) {
+        setAnswersReceived(prev => prev + 1);
+      }
     });
 
     socket.on('game:finished', (data: any) => {
@@ -295,16 +315,17 @@ export default function GamePlayPage() {
       socket.off('question:timeout');
       socket.off('question:results');
       socket.off('leaderboard:update');
+      socket.off('answer:received');
       socket.off('game:finished');
       socket.off('game:error');
-      
+
       // Limpiar timeout si existe
       if (questionResultsTimeoutRef.current) {
         clearTimeout(questionResultsTimeoutRef.current);
         questionResultsTimeoutRef.current = null;
       }
     };
-  }, [gameCode, navigate]);
+  }, [gameCode, navigate, isTeacher]);
 
   const handleAnswerSubmit = (optionId: number) => {
     if (selectedOption !== null) {
@@ -386,6 +407,30 @@ export default function GamePlayPage() {
   }
 
   if (isTeacher) {
+    // **NUEVO**: Si está en intermediate-ranking, mostrar pantalla de ranking completo
+    if (phase === 'intermediate-ranking') {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key="teacher-intermediate-ranking"
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+            >
+              <IntermediateRankingScreen
+                leaderboard={leaderboard}
+                currentUserId={user?.id || 0}
+                previousRank={undefined}
+                lastResult={null}
+              />
+            </motion.div>
+          </AnimatePresence>
+        </div>
+      );
+    }
+
+    // Panel de control normal
     return (
       <TeacherControlPanel
         gameCode={gameCode || ''}

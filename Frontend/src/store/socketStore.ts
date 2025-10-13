@@ -18,17 +18,20 @@ export const useSocketStore = create<SocketState>((set, get) => ({
   connect: () => {
     const { socket } = get();
     if (socket) {
-      console.log('[SocketStore] Ya hay un socket conectado');
+      // Ya hay un socket conectado
       return;
     }
 
     const { accessToken, user } = useAuthStore.getState();
     if (!accessToken) {
-      console.log('[SocketStore] No hay token, no se puede conectar');
+      // No hay token, no se puede conectar
       return;
     }
 
-    console.log('[SocketStore] Conectando socket para user:', user?.id);
+    // Solo log en desarrollo
+    if (import.meta.env.DEV) {
+      console.log('[SocketStore] Conectando socket para user:', user?.id);
+    }
 
     const newSocket = io(SOCKET_URL, {
       auth: { token: accessToken },
@@ -39,24 +42,35 @@ export const useSocketStore = create<SocketState>((set, get) => ({
     });
 
     newSocket.on('connect', () => {
-      console.log('[SocketStore] ✅ Socket connected, ID:', newSocket.id);
+      // Solo log en desarrollo
+      if (import.meta.env.DEV) {
+        console.log('[SocketStore] ✅ Socket connected');
+      }
       set({ isConnected: true });
     });
 
     newSocket.on('disconnect', () => {
-      console.log('[SocketStore] ❌ Socket disconnected');
+      // Solo log importante
+      if (import.meta.env.DEV) {
+        console.log('[SocketStore] ❌ Socket disconnected');
+      }
       set({ isConnected: false });
     });
 
     newSocket.on('connect_error', (error) => {
-      console.error('[SocketStore] Socket connection error:', error);
+      console.error('[SocketStore] Error de conexión:', error.message);
       set({ isConnected: false });
     });
 
-    // Log para debug de eventos
-    newSocket.onAny((event, ...args) => {
-      console.log('[Socket Event]', event, args);
-    });
+    // Solo log de eventos importantes en desarrollo
+    if (import.meta.env.DEV) {
+      newSocket.onAny((event, ...args) => {
+        // Solo loguear eventos de juego, no de conexión
+        if (!event.includes('connect') && !event.includes('ping')) {
+          console.log('[Socket]', event, args);
+        }
+      });
+    }
 
     set({ socket: newSocket });
   },

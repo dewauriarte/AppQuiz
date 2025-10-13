@@ -4,6 +4,7 @@ import prisma from '@/config/database';
 import { GameStatus } from '@prisma/client';
 import GameplayService from '@/services/GameplayService';
 import RedisGameSessionService, { PlayerState } from '@/services/RedisGameSessionService';
+import { registerSurvivalHandlers } from './survivalHandlers';
 
 interface JoinGamePayload {
   gameCode: string;
@@ -446,33 +447,52 @@ export function registerGameHandlers(io: Server): void {
           try {
             console.log(`[Game ${gameCode}] ========== TIMEOUT EJECUTADO ==========`);
             console.log(`[Game ${gameCode}] 🎮 Inicializando gameplay...`);
-            // Inicializar gameplay
-            await GameplayService.initializeGame(gameCode);
-            console.log(`[Game ${gameCode}] ✅ Gameplay inicializado`);
+            
+            // **BOARD MODE**: Verificar si es modo tablero
+            if (game.game_mode === GameMode.board) {
+              console.log(`[Game ${gameCode}] 🎲 Modo TABLERO detectado`);
+              // Solo actualizar estado, no inicializar preguntas
+              await prisma.games.update({
+                where: { game_code: gameCode },
+                data: { status: GameStatus.active },
+              });
+              
+              // Notificar inicio
+              io.to(`game:${gameCode}`).emit('game:started');
+              
+              // Inicializar tablero
+              setTimeout(async () => {
+                await initializeBoardMode(io, gameCode);
+              }, 500);
+            } else {
+              // Modo clásico - inicializar gameplay normal
+              await GameplayService.initializeGame(gameCode);
+              console.log(`[Game ${gameCode}] ✅ Gameplay inicializado`);
 
-            await prisma.games.update({
-              where: { game_code: gameCode },
-              data: { status: GameStatus.active },
-            });
-            console.log(`[Game ${gameCode}] ✅ Estado cambiado a active en BD`);
+              await prisma.games.update({
+                where: { game_code: gameCode },
+                data: { status: GameStatus.active },
+              });
+              console.log(`[Game ${gameCode}] ✅ Estado cambiado a active en BD`);
 
-            // **CRÍTICO**: Actualizar status en Redis también
-            await RedisGameSessionService.updateGameSession(gameCode, {
-              status: GameStatus.active,
-            });
-            console.log(`[Game ${gameCode}] ✅ Estado cambiado a active en Redis`);
+              // **CRÍTICO**: Actualizar status en Redis también
+              await RedisGameSessionService.updateGameSession(gameCode, {
+                status: GameStatus.active,
+              });
+              console.log(`[Game ${gameCode}] ✅ Estado cambiado a active en Redis`);
 
-            // Notificar que el juego comenzó (para que naveguen a GamePlayPage)
-            console.log(`[Game ${gameCode}] 📢 Emitiendo 'game:started'...`);
-            io.to(`game:${gameCode}`).emit('game:started');
+              // Notificar que el juego comenzó (para que naveguen a GamePlayPage)
+              console.log(`[Game ${gameCode}] 📢 Emitiendo 'game:started'...`);
+              io.to(`game:${gameCode}`).emit('game:started');
 
-            // Dar un momento para que naveguen
-            console.log(`[Game ${gameCode}] ⏱️ Esperando 500ms para que naveguen...`);
-            setTimeout(async () => {
-              // Enviar primera pregunta
-              console.log(`[Game ${gameCode}] 📝 Llamando a sendQuestion()...`);
-              await sendQuestion(io, gameCode);
-            }, 500);
+              // Dar un momento para que naveguen
+              console.log(`[Game ${gameCode}] ⏱️ Esperando 500ms para que naveguen...`);
+              setTimeout(async () => {
+                // Enviar primera pregunta
+                console.log(`[Game ${gameCode}] 📝 Llamando a sendQuestion()...`);
+                await sendQuestion(io, gameCode);
+              }, 500);
+            }
           } catch (error) {
             console.error(`[Game ${gameCode}] ❌ Error activating game:`, error);
             io.to(`game:${gameCode}`).emit('game:error', {
@@ -730,6 +750,12 @@ export function registerGameHandlers(io: Server): void {
         callback({ success: false, message: error.message });
       }
     });
+
+    // Registrar handlers de board mode
+    registerBoardModeHandlers(socket, io);
+    
+    // Registrar handlers de survival mode
+    registerSurvivalHandlers(socket);
   });
 }
 
@@ -906,5 +932,240 @@ async function endGame(io: any, gameCode: string) {
       message: 'Error al finalizar el juego',
     });
   }
+}
+
+/**
+ * ==========================================
+ * BOARD MODE HANDLERS - Sprint 11
+ * ==========================================
+ */
+
+import BoardGameService from '@/services/BoardGameService';
+import { BoardGameConfig } from '@/types/boardGame.types';
+import { GameMode } from '@prisma/client';
+
+/**
+ * Inicializa el modo tablero
+ */
+export async function initializeBoardMode(io: Server, gameCode: string): Promise<void> {
+  try {
+    console.log(`[BoardMode] 🎲 Initializing board for game ${gameCode}`);
+
+    // Obtener configuración del juego
+    const game = await prisma.games.findUnique({
+      where: { game_code: gameCode },
+    });
+
+    if (!game || game.game_mode !== GameMode.board) {
+      throw new Error('Game is not in board mode');
+    }
+
+    // Parsear configuración del tablero desde game.config
+    const config = game.config as any;
+    const boardConfig: BoardGameConfig = {
+      board_size: config?.board_size || 40,
+      board_layout: config?.board_layout || 'serpentine',
+      event_positions: [],
+      checkpoint_positions: [],
+      shop_positions: [],
+      win_condition: config?.win_condition || 'reach_end',
+      max_turns: config?.max_turns,
+      turn_timeout: config?.turn_timeout || 15,
+      dice_type: 'standard',
+      enable_questions: config?.enable_questions !== false,
+      question_frequency: config?.question_frequency || 3,
+    };
+
+    // Inicializar tablero
+    const boardState = await BoardGameService.initializeBoardGame(gameCode, boardConfig);
+
+    // Obtener jugadores
+    const players = await BoardGameService.getAllBoardPlayers(gameCode);
+
+    // Emitir estado inicial a todos los jugadores
+    io.to(`game:${gameCode}`).emit('board:initialized', {
+      board_state: boardState,
+      players: players,
+      current_player_id: boardState.turn_order[0],
+    });
+
+    // Iniciar primer turno
+    await startBoardTurn(io, gameCode);
+
+    console.log(`✅ [BoardMode] Board initialized for ${gameCode}`);
+  } catch (error) {
+    console.error('[BoardMode] ❌ Error initializing board:', error);
+    io.to(`game:${gameCode}`).emit('game:error', {
+      message: 'Error al inicializar el tablero',
+    });
+  }
+}
+
+/**
+ * Inicia el turno de un jugador en modo tablero
+ */
+async function startBoardTurn(io: Server, gameCode: string): Promise<void> {
+  try {
+    const boardState = await BoardGameService['getBoardState'](gameCode);
+    if (!boardState) return;
+
+    const currentPlayerId = boardState.turn_order[boardState.current_turn];
+    const timeoutAt = Date.now() + (15 * 1000); // 15 segundos
+
+    io.to(`game:${gameCode}`).emit('board:turn-start', {
+      player_id: currentPlayerId,
+      turn_number: boardState.current_turn + 1,
+      timeout_at: timeoutAt,
+    });
+
+    console.log(`🎯 [BoardMode] Turn started for player ${currentPlayerId}`);
+  } catch (error) {
+    console.error('[BoardMode] Error starting turn:', error);
+  }
+}
+
+/**
+ * Handler: Tirar dado en modo tablero
+ */
+export function handleBoardRollDice(socket: CustomSocket, io: Server): void {
+  socket.on('board:roll-dice', async (payload: { gameCode: string }, callback) => {
+    try {
+      const { gameCode } = payload;
+      const userId = socket.user?.userId;
+
+      if (!userId) {
+        return callback?.({ success: false, message: 'Usuario no autenticado' });
+      }
+
+      console.log(`🎲 [BoardMode] Player ${userId} rolling dice in game ${gameCode}`);
+
+      // Tirar dado
+      const result = await BoardGameService.rollDice(gameCode, userId);
+
+      // Emitir resultado a todos
+      io.to(`game:${gameCode}`).emit('board:player-moved', {
+        user_id: result.userId,
+        dice_value: result.diceValue,
+        old_position: result.oldPosition,
+        new_position: result.newPosition,
+        event: result.event,
+      });
+
+      // Si hubo evento, emitirlo separadamente
+      if (result.event) {
+        io.to(`game:${gameCode}`).emit('board:event-triggered', {
+          user_id: result.userId,
+          event: result.event,
+        });
+      }
+
+      // Verificar si hay ganador
+      const winCheck = await BoardGameService.checkWinCondition(gameCode);
+      if (winCheck.hasWinner && winCheck.winnerId) {
+        // Finalizar juego
+        await endBoardGame(io, gameCode);
+      } else {
+        // Avanzar turno después de un delay
+        setTimeout(async () => {
+          const turnResult = await BoardGameService.advanceTurn(gameCode);
+          io.to(`game:${gameCode}`).emit('board:turn-change', {
+            current_player_id: turnResult.current_player_id,
+            next_player_id: turnResult.next_player_id,
+            turn_number: turnResult.turn_number,
+            timeout_at: turnResult.timeout_at,
+          });
+        }, 3000); // 3 segundos de delay para animaciones
+      }
+
+      callback?.({ success: true, result });
+    } catch (error: any) {
+      console.error('[BoardMode] Error rolling dice:', error);
+      callback?.({ success: false, message: error.message });
+    }
+  });
+}
+
+/**
+ * Handler: Obtener estado del tablero
+ */
+export function handleBoardGetState(socket: CustomSocket): void {
+  socket.on('board:get-state', async (payload: { gameCode: string }, callback) => {
+    try {
+      const { gameCode } = payload;
+
+      const boardState = await BoardGameService['getBoardState'](gameCode);
+      const players = await BoardGameService.getAllBoardPlayers(gameCode);
+
+      callback?.({
+        success: true,
+        board_state: boardState,
+        players: players,
+      });
+    } catch (error: any) {
+      console.error('[BoardMode] Error getting board state:', error);
+      callback?.({ success: false, message: error.message });
+    }
+  });
+}
+
+/**
+ * Handler: Comprar item en checkpoint
+ */
+export function handleBoardBuyItem(socket: CustomSocket): void {
+  socket.on('board:buy-item', async (payload: { gameCode: string; itemType: string }, callback) => {
+    try {
+      const userId = socket.user?.userId;
+
+      if (!userId) {
+        return callback?.({ success: false, message: 'Usuario no autenticado' });
+      }
+
+      // TODO: Implementar lógica de compra de items
+      // gameCode y itemType se usarán cuando se implemente la funcionalidad completa
+      console.log('[BoardMode] Buy item requested:', payload);
+
+      callback?.({ success: true, message: 'Item comprado (funcionalidad en desarrollo)' });
+    } catch (error: any) {
+      console.error('[BoardMode] Error buying item:', error);
+      callback?.({ success: false, message: error.message });
+    }
+  });
+}
+
+/**
+ * Finaliza el juego de tablero
+ */
+async function endBoardGame(io: Server, gameCode: string): Promise<void> {
+  try {
+    console.log(`🏁 [BoardMode] Ending board game ${gameCode}`);
+
+    const result = await BoardGameService.endBoardGame(gameCode);
+
+    // Emitir resultado final
+    io.to(`game:${gameCode}`).emit('board:game-finished', {
+      winner_id: result.winner_id,
+      final_positions: result.final_positions,
+      reason: result.reason,
+    });
+
+    // Limpiar sesión
+    await BoardGameService.cleanupBoardSession(gameCode);
+
+    console.log(`✅ [BoardMode] Board game ended: Winner is player ${result.winner_id}`);
+  } catch (error) {
+    console.error('[BoardMode] Error ending board game:', error);
+    io.to(`game:${gameCode}`).emit('game:error', {
+      message: 'Error al finalizar el juego de tablero',
+    });
+  }
+}
+
+/**
+ * Registrar handlers de board mode
+ */
+export function registerBoardModeHandlers(socket: CustomSocket, io: Server): void {
+  handleBoardRollDice(socket, io);
+  handleBoardGetState(socket);
+  handleBoardBuyItem(socket);
 }
 

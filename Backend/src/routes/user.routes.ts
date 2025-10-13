@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { requireAuth } from '@middleware/auth';
 import * as UserStatsService from '@services/UserStatsService';
+import AvatarController from '@controllers/AvatarController';
 
 const router = Router();
 
@@ -99,6 +100,34 @@ router.get('/:id/progress', requireAuth, async (req: Request, res: Response) => 
     return res.status(500).json({ message: 'Error al obtener datos de progreso' });
   }
 });
+
+/**
+ * Avatar Routes - Sprint 7
+ */
+
+/**
+ * GET /api/users/:id/avatar
+ * Obtiene configuración de avatar del usuario
+ */
+router.get('/:id/avatar', requireAuth, AvatarController.getAvatar);
+
+/**
+ * PUT /api/users/avatar
+ * Actualiza el avatar del usuario autenticado
+ */
+router.put('/avatar', requireAuth, AvatarController.updateAvatar);
+
+/**
+ * PUT /api/users/:id/avatar
+ * Actualiza el avatar de un usuario específico (admin only)
+ */
+router.put('/:id/avatar', requireAuth, AvatarController.updateUserAvatar);
+
+/**
+ * DELETE /api/users/avatar
+ * Resetea el avatar del usuario autenticado al default
+ */
+router.delete('/avatar', requireAuth, AvatarController.resetAvatar);
 
 export default router;
 

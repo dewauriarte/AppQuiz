@@ -12,6 +12,10 @@ import WaitingScreen from '@/components/game/WaitingScreen';
 import FinalResultsScreen from '@/components/game/FinalResultsScreen';
 import TeacherControlPanel from '@/components/game/TeacherControlPanel';
 import IntermediateRankingScreen from '@/components/game/IntermediateRankingScreen';
+import { BoardGameScreen, BoardGameHUD, TurnIndicator, EventPopup, BoardFinalResultsScreen } from '@/components/game/board';
+import { useBoardGame } from '@/hooks/useBoardGame';
+import type { BoardEventTrigger, BoardGameFinishedPayload } from '@/types/board-game';
+import { SurvivalGameScreen } from '@/components/game/survival';
 
 type GamePhase = 'waiting' | 'question' | 'result' | 'intermediate-ranking' | 'leaderboard' | 'finished';
 
@@ -85,6 +89,25 @@ export default function GamePlayPage() {
   const isTeacherByRole = user?.role === 'teacher';
   const isTeacherById = game?.teacher_id && user?.id && Number(game.teacher_id) === Number(user.id);
   const isTeacher = isTeacherById || isTeacherByRole;
+  const isBoardMode = game?.game_mode === 'board';
+  const isSurvivalMode = game?.game_mode === 'survival';
+
+  // Debug: Mostrar modo de juego
+  useEffect(() => {
+    if (game) {
+      console.log('[GamePlayPage] 🎮 Modo de juego:', game.game_mode);
+      console.log('[GamePlayPage] isBoardMode:', isBoardMode);
+      console.log('[GamePlayPage] isSurvivalMode:', isSurvivalMode);
+    }
+  }, [game, isBoardMode, isSurvivalMode]);
+
+  // Board mode state
+  const [currentEvent, setCurrentEvent] = useState<BoardEventTrigger | null>(null);
+  const [boardFinalResults, setBoardFinalResults] = useState<BoardGameFinishedPayload | null>(null);
+  const boardGame = useBoardGame({ 
+    gameCode: gameCode || '', 
+    userId: user?.id || 0 
+  });
 
   useEffect(() => {
     // ✅ CRÍTICO: Esperar a que se complete la hidratación antes de continuar
@@ -266,6 +289,15 @@ export default function GamePlayPage() {
       // El countdown se limpiará cuando llegue question:new
     });
 
+    // **BOARD MODE**: Escuchar cuando el juego comienza (especialmente importante para Board Mode)
+    socket.on('game:started', () => {
+      console.log('[GamePlayPage] 🎮 Juego iniciado (game:started recibido)');
+      // Si es modo Board, mantener en waiting hasta recibir board:initialized
+      // Si es modo Classic, mantener en waiting hasta recibir question:new
+      setPhase('waiting');
+      setCountdown(null);
+    });
+
     // Escuchar eventos del juego
     socket.on('question:new', (data: any) => {
 
@@ -432,11 +464,22 @@ export default function GamePlayPage() {
       toast.error(data.message);
     });
 
+    // **BOARD MODE**: Escuchar finalización del juego de tablero
+    socket.on('board:game_finished', (data: BoardGameFinishedPayload) => {
+      console.log('[GamePlayPage] 🏁 Juego de tablero terminado:', data);
+      setBoardFinalResults(data);
+      toast.success(`¡${data.final_positions.find(p => p.userId === data.winner_id)?.nickname} ganó!`, {
+        icon: '🏆',
+        duration: 5000,
+      });
+    });
+
     return () => {
       console.log('[GamePlayPage] 🧹 Cleaning up socket listeners');
       // NO resetear isInitializedRef aquí para evitar re-setup en Strict Mode
       // Solo se resetea si el gameCode realmente cambia
       socket.off('game:countdown');
+      socket.off('game:started');
       socket.off('question:new');
       socket.off('timer:tick');
       socket.off('question:timeout');
@@ -448,6 +491,7 @@ export default function GamePlayPage() {
       socket.off('game:player-reconnected');
       socket.off('answer:received');
       socket.off('game:finished');
+      socket.off('board:game_finished');
       socket.off('game:error');
 
       // Limpiar timeout si existe
@@ -546,25 +590,90 @@ export default function GamePlayPage() {
   if (!hasHydrated) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
+        <div className="text-white">Cargando...</div>
+      </div>
+    );
+  }
+
+  // **CRÍTICO**: Esperar a que game esté cargado antes de renderizar
+  // Esto previene el flash de pantalla incorrecta
+  if (!game) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
         <div className="text-center">
           <div className="w-12 h-12 border-4 border-purple-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-purple-300 font-gaming">Cargando sesión...</p>
+          <p className="text-purple-300 font-gaming">Conectando al juego...</p>
         </div>
       </div>
     );
   }
 
+  // Vista del profesor
   if (isTeacher) {
-    // **NUEVO**: Si está en intermediate-ranking, mostrar pantalla de ranking completo
-    if (phase === 'intermediate-ranking') {
+    // **BOARD MODE**: Si es modo tablero, mostrar la misma vista que los jugadores
+    if (isBoardMode && boardGame.boardState && user) {
+      return (
+        <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 overflow-hidden">
+          {/* Turn Indicator Banner */}
+          <TurnIndicator
+            currentPlayer={boardGame.players.find(p => p.is_turn) || null}
+            isMyTurn={false}
+            players={boardGame.players}
+          />
+
+          {/* Main Board */}
+          <BoardGameScreen
+            boardState={boardGame.boardState}
+            players={boardGame.players}
+            currentUserId={user.id}
+            onRollDice={boardGame.rollDice}
+            isMyTurn={false}
+          />
+
+          {/* HUD Overlay */}
+          <BoardGameHUD
+            players={boardGame.players}
+            currentUserId={user.id}
+            turnTimeoutAt={boardGame.boardState.turn_timeout_at}
+            isMyTurn={false}
+            isRolling={boardGame.isRolling}
+            onRollDice={boardGame.rollDice}
+            diceHistory={boardGame.lastDiceRoll ? [boardGame.lastDiceRoll.diceValue] : []}
+            currentPlayerName={boardGame.players.find(p => p.is_turn)?.nickname}
+          />
+
+          {/* Event Popup */}
+          <EventPopup
+            event={currentEvent}
+            onDismiss={() => setCurrentEvent(null)}
+          />
+
+          {/* Teacher Badge */}
+          <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-purple-600 text-white px-4 py-2 rounded-full shadow-lg font-bold">
+            👨‍🏫 Vista del Profesor
+          </div>
+
+          {/* Game Finished - Board Mode Results */}
+          {boardFinalResults && (
+            <BoardFinalResultsScreen
+              results={boardFinalResults}
+              currentUserId={user.id}
+            />
+          )}
+        </div>
+      );
+    }
+
+    // Si está en fase de resultados finales, mostrar la vista de pantalla completa
+    if (phase === 'finished' && finalResults) {
       return (
         <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900">
           <AnimatePresence mode="wait">
             <motion.div
-              key="teacher-intermediate-ranking"
-              initial={{ opacity: 0, scale: 0.8 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.8 }}
+              key="finished-teacher"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
             >
               <IntermediateRankingScreen
                 leaderboard={leaderboard}
@@ -591,6 +700,73 @@ export default function GamePlayPage() {
         finalResults={finalResults}
         onContinue={handleContinue}
       />
+    );
+  }
+
+  // **SURVIVAL MODE**: Renderizar modo supervivencia
+  if (isSurvivalMode && gameCode && user) {
+    return <SurvivalGameScreen gameCode={gameCode} userId={user.id} />;
+  }
+
+  // **BOARD MODE**: Mostrar pantalla de carga mientras se inicializa el tablero
+  if (isBoardMode && !boardGame.boardState) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="w-16 h-16 border-4 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+          <p className="text-blue-300 font-gaming text-xl mb-2">Inicializando tablero...</p>
+          <p className="text-blue-400 text-sm">Preparando el juego 🎲</p>
+        </div>
+      </div>
+    );
+  }
+
+  // **BOARD MODE**: Renderizar tablero cuando esté listo
+  if (isBoardMode && boardGame.boardState && user) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-900 via-purple-900 to-indigo-900 overflow-hidden">
+        {/* Turn Indicator Banner */}
+        <TurnIndicator
+          currentPlayer={boardGame.players.find(p => p.is_turn) || null}
+          isMyTurn={boardGame.isMyTurn}
+          players={boardGame.players}
+        />
+
+        {/* Main Board */}
+        <BoardGameScreen
+          boardState={boardGame.boardState}
+          players={boardGame.players}
+          currentUserId={user.id}
+          onRollDice={boardGame.rollDice}
+          isMyTurn={boardGame.isMyTurn}
+        />
+
+        {/* HUD Overlay */}
+        <BoardGameHUD
+          players={boardGame.players}
+          currentUserId={user.id}
+          turnTimeoutAt={boardGame.boardState.turn_timeout_at}
+          isMyTurn={boardGame.isMyTurn}
+          isRolling={boardGame.isRolling}
+          onRollDice={boardGame.rollDice}
+          diceHistory={boardGame.lastDiceRoll ? [boardGame.lastDiceRoll.diceValue] : []}
+          currentPlayerName={boardGame.players.find(p => p.is_turn)?.nickname}
+        />
+
+        {/* Event Popup */}
+        <EventPopup
+          event={currentEvent}
+          onDismiss={() => setCurrentEvent(null)}
+        />
+
+        {/* Game Finished - Board Mode Results */}
+        {boardFinalResults && (
+          <BoardFinalResultsScreen
+            results={boardFinalResults}
+            currentUserId={user.id}
+          />
+        )}
+      </div>
     );
   }
 

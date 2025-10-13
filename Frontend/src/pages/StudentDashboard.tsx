@@ -8,6 +8,7 @@ import Topbar from '@/components/layout/Topbar';
 import { useQuery } from '@tanstack/react-query';
 import { getUserStats } from '@/services/userStatsService';
 import MiniLeaderboard from '@/components/dashboard/MiniLeaderboard';
+import { QuickAccessCards } from '@/components/dashboard/QuickAccessCards';
 
 export default function StudentDashboard() {
   const { user, accessToken } = useAuthStore();
@@ -122,11 +123,20 @@ export default function StudentDashboard() {
               ))}
           </div>
 
+          {/* Quick Access Cards - Sprint 7 Features */}
+          <motion.div
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.5 }}
+          >
+            <QuickAccessCards />
+          </motion.div>
+
           {/* Stats */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.6 }}
+            transition={{ delay: 0.7 }}
           >
             <Card className="bg-slate-800 border-2 border-indigo-500">
               <CardHeader className="border-b border-indigo-500/30">

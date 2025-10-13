@@ -3,14 +3,25 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import rateLimit from 'express-rate-limit';
+import path from 'path';
+import { fileURLToPath } from 'url';   // 👈 Importar utilidades para __dirname
 import { env } from '@config/env';
 import routes from '@routes/index';
 import { errorHandler } from '@middleware/errorHandler';
 
+// Simular __dirname en ESM
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+
 const app = express();
 
 // Security middleware
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' }, // Permitir cargar imágenes
+  })
+);
 
 // CORS
 app.use(
@@ -20,10 +31,10 @@ app.use(
   })
 );
 
-// Rate limiting (more permissive in development)
+// Rate limiting
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: env.NODE_ENV === 'production' ? 100 : 1000, // 1000 for dev, 100 for production
+  windowMs: 15 * 60 * 1000,
+  max: env.NODE_ENV === 'production' ? 100 : 1000,
   message: 'Too many requests from this IP, please try again later',
   standardHeaders: true,
   legacyHeaders: false,
@@ -37,6 +48,9 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Compression
 app.use(compression());
+
+// Servir archivos estáticos
+app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
 
 // Routes
 app.use('/api/v1', routes);
@@ -53,4 +67,3 @@ app.use((_req, res) => {
 app.use(errorHandler);
 
 export default app;
-

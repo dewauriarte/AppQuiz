@@ -1,5 +1,6 @@
 import { useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
+import '@/styles/rarity-glow.css';
 import { useAuthStore } from '@/store/authStore';
 import { useSocketStore } from '@/store/socketStore';
 import LoginPage from '@/pages/LoginPage';
@@ -22,7 +23,13 @@ import JoinGamePage from '@/pages/JoinGamePage';
 import GamePlayPage from '@/pages/GamePlayPage';
 import ProfilePage from '@/pages/ProfilePage';
 import LeaderboardPage from '@/pages/LeaderboardPage';
+import { AvatarCustomization } from '@/pages/AvatarCustomization';
+import { Shop } from '@/pages/Shop';
+import { Inventory } from '@/pages/Inventory';
+import AdminShopManagement from '@/pages/AdminShopManagement';
+import AdminDashboard from '@/pages/AdminDashboard';
 import ProtectedRoute from '@/components/ProtectedRoute';
+import { Toaster } from '@/components/ui/toaster';
 
 function App() {
   const { checkAuth, isAuthenticated, accessToken } = useAuthStore();
@@ -47,6 +54,7 @@ function App() {
   }, [isAuthenticated, accessToken, connect, disconnect]);
 
   return (
+    <>
     <Routes>
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />
@@ -194,8 +202,50 @@ function App() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/avatar"
+        element={
+          <ProtectedRoute>
+            <AvatarCustomization />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/shop"
+        element={
+          <ProtectedRoute>
+            <Shop />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/inventory"
+        element={
+          <ProtectedRoute>
+            <Inventory />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute>
+            <AdminDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/shop"
+        element={
+          <ProtectedRoute>
+            <AdminShopManagement />
+          </ProtectedRoute>
+        }
+      />
       <Route path="/" element={<Navigate to="/dashboard" replace />} />
     </Routes>
+    <Toaster />
+    </>
   );
 }
 

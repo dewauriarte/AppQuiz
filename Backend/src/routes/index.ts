@@ -9,6 +9,11 @@ import gameRoutes from './game.routes';
 import userRoutes from './user.routes';
 import leaderboardRoutes from './leaderboard.routes';
 import teacherRoutes from './teacher.routes';
+import shopRoutes from './shop.routes';
+import inventoryRoutes from './inventory.routes';
+import adminShopRoutes from './admin-shop.routes';
+import boardGameRoutes from './boardGame.routes';
+import survivalRoutes from './survivalRoutes';
 
 const router = Router();
 
@@ -19,9 +24,14 @@ router.use('/questions', questionRoutes);
 router.use('/ai-question-sets', aiQuestionSetRoutes);
 router.use('/lists', classListRoutes);
 router.use('/games', gameRoutes);
+router.use('/games', boardGameRoutes); // Board mode endpoints
+router.use('/games', survivalRoutes); // Survival mode endpoints
 router.use('/users', userRoutes);
 router.use('/leaderboards', leaderboardRoutes);
 router.use('/teachers', teacherRoutes);
+router.use('/shop', shopRoutes);
+router.use('/inventory', inventoryRoutes);
+router.use('/admin/shop', adminShopRoutes);
 
 // Health check
 router.get('/health', (_req, res) => {

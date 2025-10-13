@@ -43,6 +43,27 @@ const excelFileFilter = (
   }
 };
 
+// Filtro de archivos - solo imágenes
+const imageFileFilter = (
+  _req: Request,
+  file: Express.Multer.File,
+  cb: FileFilterCallback
+) => {
+  const allowedMimeTypes = [
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+  ];
+
+  if (allowedMimeTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new BadRequestError('Only image files (JPEG, PNG, GIF, WEBP) are allowed'));
+  }
+};
+
 // Configuración para PDFs
 export const uploadPDF = multer({
   storage,
@@ -62,4 +83,28 @@ export const uploadExcel = multer({
     files: 1,
   },
 }).single('file');
+
+// Configuración para imágenes individuales
+export const uploadImage = multer({
+  storage,
+  fileFilter: imageFileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5 MB máximo
+    files: 1,
+  },
+}).single('image');
+
+// Configuración para múltiples imágenes (item principal + preview)
+export const uploadItemImages = multer({
+  storage,
+  fileFilter: imageFileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5 MB por archivo
+    files: 3, // image, icon, preview
+  },
+}).fields([
+  { name: 'image', maxCount: 1 },
+  { name: 'icon', maxCount: 1 },
+  { name: 'preview', maxCount: 1 },
+]);
 

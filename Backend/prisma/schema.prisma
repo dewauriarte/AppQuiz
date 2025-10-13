@@ -677,6 +677,7 @@ model user_pets {
 model user_profiles {
   user_id                  Int       @id
   avatar_url               String?   @default("/avatars/default.png") @db.VarChar(255)
+  avatar_parts             Json?
   avatar_frame_url         String?   @db.VarChar(255)
   profile_background_url   String?   @db.VarChar(255)
   title                    String?   @db.VarChar(100)
@@ -783,6 +784,8 @@ model users {
   created_at                                        DateTime                @default(now()) @db.Timestamp(6)
   updated_at                                        DateTime                @default(now()) @db.Timestamp(6)
   activity_logs                                     activity_logs[]
+  class_list_students                               class_list_students[]   @relation("class_list_student")
+  class_lists                                       class_lists[]           @relation("class_lists_teacher")
   currency_transactions                             currency_transactions[]
   friendships_friendships_friend_idTousers          friendships[]           @relation("friendships_friend_idTousers")
   friendships_friendships_user_idTousers            friendships[]           @relation("friendships_user_idTousers")
@@ -804,8 +807,6 @@ model users {
   user_reports_user_reports_reported_user_idTousers user_reports[]          @relation("user_reports_reported_user_idTousers")
   user_reports_user_reports_reporter_idTousers      user_reports[]          @relation("user_reports_reporter_idTousers")
   user_sessions                                     user_sessions[]
-  class_lists                                       class_lists[]           @relation("class_lists_teacher")
-  class_list_students                               class_list_students[]   @relation("class_list_student")
 
   @@index([email], map: "idx_users_email")
   @@index([role], map: "idx_users_role")
@@ -814,26 +815,26 @@ model users {
 
 /// Class lists for teachers to manage their students
 model class_lists {
-  list_id               Int                     @id @default(autoincrement())
-  teacher_id            Int
-  name                  String                  @db.VarChar(100)
-  grade_level           String?                 @db.VarChar(50)
-  created_at            DateTime                @default(now()) @db.Timestamp(6)
-  updated_at            DateTime                @default(now()) @db.Timestamp(6)
-  teacher               users                   @relation("class_lists_teacher", fields: [teacher_id], references: [user_id], onDelete: Cascade)
-  class_list_students   class_list_students[]
+  list_id             Int                   @id @default(autoincrement())
+  teacher_id          Int
+  name                String                @db.VarChar(100)
+  grade_level         String?               @db.VarChar(50)
+  created_at          DateTime              @default(now()) @db.Timestamp(6)
+  updated_at          DateTime              @default(now()) @db.Timestamp(6)
+  class_list_students class_list_students[]
+  teacher             users                 @relation("class_lists_teacher", fields: [teacher_id], references: [user_id], onDelete: Cascade)
 
   @@index([teacher_id], map: "idx_class_lists_teacher")
 }
 
 /// Students in a class list
 model class_list_students {
-  list_id     Int
-  user_id     Int
-  nickname    String?     @db.VarChar(50)
-  added_at    DateTime    @default(now()) @db.Timestamp(6)
-  list        class_lists @relation(fields: [list_id], references: [list_id], onDelete: Cascade)
-  student     users       @relation("class_list_student", fields: [user_id], references: [user_id], onDelete: Cascade)
+  list_id  Int
+  user_id  Int
+  nickname String?     @db.VarChar(50)
+  added_at DateTime    @default(now()) @db.Timestamp(6)
+  list     class_lists @relation(fields: [list_id], references: [list_id], onDelete: Cascade)
+  student  users       @relation("class_list_student", fields: [user_id], references: [user_id], onDelete: Cascade)
 
   @@id([list_id, user_id])
   @@index([user_id], map: "idx_class_list_students_user")

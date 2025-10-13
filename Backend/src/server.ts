@@ -5,6 +5,7 @@ import prisma from '@config/database';
 import redis, { closeRedis } from '@config/redis';
 import { initializeSocket } from '@config/socket';
 import { registerGameHandlers } from '@/socket/gameHandlers';
+import { registerSurvivalHandlers } from '@/socket/survivalHandlers';
 import { setSocketIO } from '@/socket/socketInstance';
 
 const PORT = parseInt(env.PORT, 10) || 4000;

@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { 
   Trophy, Target, Swords, TrendingUp, Award, Calendar, 
-  Zap, CheckCircle, ArrowLeft, Loader2, Crown
+  Zap, CheckCircle, ArrowLeft, Loader2, Crown, Sparkles
 } from 'lucide-react';
 import Topbar from '@/components/layout/Topbar';
 import { useQuery } from '@tanstack/react-query';
@@ -62,6 +62,14 @@ export default function ProfilePage() {
                     <Crown className="w-5 h-5 text-white" />
                   </div>
                 )}
+                <Button
+                  onClick={() => navigate('/avatar')}
+                  size="sm"
+                  className="absolute -bottom-2 left-1/2 -translate-x-1/2 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 text-white shadow-lg"
+                >
+                  <Sparkles className="w-4 h-4 mr-1" />
+                  Personalizar
+                </Button>
               </div>
 
               {/* User Info */}

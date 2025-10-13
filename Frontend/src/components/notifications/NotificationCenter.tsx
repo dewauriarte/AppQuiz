@@ -28,11 +28,11 @@ export default function NotificationCenter() {
 
   useEffect(() => {
     if (!socket) {
-      console.log('[NotificationCenter] Socket no disponible');
+      // Socket no disponible
       return;
     }
 
-    console.log('[NotificationCenter] Socket conectado, escuchando invitaciones...');
+    // Socket conectado, escuchando invitaciones...
 
     // Escuchar invitaciones
     socket.on('game:invitation', (data: Omit<GameInvitation, 'id'>) => {

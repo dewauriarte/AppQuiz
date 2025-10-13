@@ -8,6 +8,7 @@ import classListRoutes from './classList.routes';
 import gameRoutes from './game.routes';
 import userRoutes from './user.routes';
 import leaderboardRoutes from './leaderboard.routes';
+import teacherRoutes from './teacher.routes';
 
 const router = Router();
 
@@ -20,6 +21,7 @@ router.use('/lists', classListRoutes);
 router.use('/games', gameRoutes);
 router.use('/users', userRoutes);
 router.use('/leaderboards', leaderboardRoutes);
+router.use('/teachers', teacherRoutes);
 
 // Health check
 router.get('/health', (_req, res) => {

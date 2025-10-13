@@ -224,12 +224,7 @@ export class GameplayService {
       explanation: opt.explanation || null, // Incluir explicación de cada opción
     }));
 
-    // Actualizar timestamp de inicio de pregunta
-    await RedisGameSessionService.updateGameSession(gameCode, {
-      questionStartTime: Date.now(),
-    });
-
-    return {
+    const preparedQuestion = {
       questionNumber: gameSession.currentQuestionIndex + 1,
       totalQuestions: gameSession.totalQuestions,
       questionId: question.question_id,
@@ -240,6 +235,14 @@ export class GameplayService {
       mediaUrl: question.media_url,
       mediaType: question.media_type,
     };
+
+    // ✅ CRÍTICO: Guardar pregunta actual en Redis para recuperación
+    await RedisGameSessionService.updateGameSession(gameCode, {
+      questionStartTime: Date.now(),
+      currentQuestion: preparedQuestion, // Guardar la pregunta completa
+    });
+
+    return preparedQuestion;
   }
 
   /**
@@ -408,9 +411,11 @@ export class GameplayService {
     }
 
     const nextIndex = gameSession.currentQuestionIndex + 1;
-    
+
+    // ✅ CRÍTICO: Limpiar pregunta actual al avanzar
     await RedisGameSessionService.updateGameSession(gameCode, {
       currentQuestionIndex: nextIndex,
+      currentQuestion: null, // Limpiar pregunta anterior
     });
 
     return nextIndex < gameSession.totalQuestions;

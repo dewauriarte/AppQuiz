@@ -4,6 +4,21 @@ import * as LeaderboardService from '@services/LeaderboardService';
 
 const router = Router();
 
+// Helper para convertir BigInt a Number en objetos
+function convertBigIntToNumber(obj: any): any {
+  if (obj === null || obj === undefined) return obj;
+  if (typeof obj === 'bigint') return Number(obj);
+  if (Array.isArray(obj)) return obj.map(convertBigIntToNumber);
+  if (typeof obj === 'object') {
+    const converted: any = {};
+    for (const key in obj) {
+      converted[key] = convertBigIntToNumber(obj[key]);
+    }
+    return converted;
+  }
+  return obj;
+}
+
 /**
  * GET /api/leaderboards/global
  * Obtiene el leaderboard global
@@ -26,13 +41,13 @@ router.get('/global', requireAuth, async (req: Request, res: Response) => {
       currentUserRank = await LeaderboardService.getUserGlobalRank(req.userId);
     }
 
-    return res.json({
+    return res.json(convertBigIntToNumber({
       leaderboard,
       period,
       limit,
       offset,
       current_user_rank: currentUserRank,
-    });
+    }));
   } catch (error: any) {
     console.error('Error getting global leaderboard:', error);
     return res.status(500).json({ message: 'Error al obtener leaderboard global' });
@@ -51,10 +66,10 @@ router.get('/friends', requireAuth, async (req: Request, res: Response) => {
 
     const leaderboard = await LeaderboardService.getFriendsLeaderboard(req.userId);
 
-    return res.json({
+    return res.json(convertBigIntToNumber({
       leaderboard,
       total: leaderboard.length,
-    });
+    }));
   } catch (error: any) {
     console.error('Error getting friends leaderboard:', error);
     return res.status(500).json({ message: 'Error al obtener leaderboard de amigos' });
@@ -70,10 +85,10 @@ router.get('/rank/:userId', requireAuth, async (req: Request, res: Response) => 
     const userId = parseInt(req.params.userId);
     const rank = await LeaderboardService.getUserGlobalRank(userId);
 
-    return res.json({
+    return res.json(convertBigIntToNumber({
       user_id: userId,
       global_rank: rank,
-    });
+    }));
   } catch (error: any) {
     console.error('Error getting user rank:', error);
     return res.status(500).json({ message: 'Error al obtener ranking del usuario' });

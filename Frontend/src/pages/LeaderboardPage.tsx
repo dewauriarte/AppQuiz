@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '@/store/authStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Trophy, Crown, Medal, Star, Loader2, Users } from 'lucide-react';
+import { Trophy, Crown, Medal, Star, Loader2, Users, ArrowLeft } from 'lucide-react';
 import Topbar from '@/components/layout/Topbar';
 import { useQuery } from '@tanstack/react-query';
 import { getGlobalLeaderboard, getFriendsLeaderboard } from '@/services/userStatsService';
@@ -12,6 +13,7 @@ type LeaderboardTab = 'global' | 'friends';
 
 export default function LeaderboardPage() {
   const { user, accessToken } = useAuthStore();
+  const navigate = useNavigate();
   const [activeTab, setActiveTab] = useState<LeaderboardTab>('global');
   const [page, setPage] = useState(0);
   const limit = 20;
@@ -44,16 +46,26 @@ export default function LeaderboardPage() {
       
       <div className="container mx-auto px-4 py-8">
         <div className="space-y-6">
-          {/* Header */}
+          {/* Header con botón de regreso */}
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            className="text-center"
+            className="relative"
           >
-            <h1 className="text-6xl font-gaming text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 mb-4">
-              🏆 RANKINGS 🏆
-            </h1>
-            <p className="text-xl text-purple-300">Compite con los mejores jugadores</p>
+            <Button
+              onClick={() => navigate('/dashboard')}
+              className="absolute left-0 top-0 bg-slate-700 hover:bg-slate-600 text-white px-6 py-3 font-gaming"
+            >
+              <ArrowLeft className="w-5 h-5 mr-2" />
+              VOLVER
+            </Button>
+            
+            <div className="text-center">
+              <h1 className="text-6xl font-gaming text-transparent bg-clip-text bg-gradient-to-r from-yellow-400 via-orange-500 to-red-500 mb-4">
+                🏆 RANKINGS 🏆
+              </h1>
+              <p className="text-xl text-purple-300">Compite con los mejores jugadores</p>
+            </div>
           </motion.div>
 
           {/* Tabs */}

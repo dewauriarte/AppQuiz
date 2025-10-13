@@ -4,12 +4,21 @@ import { useAuthStore } from '@/store/authStore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { BookOpen, Play, BarChart3, FileUp, Sparkles, Users, Calendar, Award, Scroll, Wand2, UserCog } from 'lucide-react';
+import { BookOpen, Play, BarChart3, FileUp, Sparkles, Users, Calendar, Award, Scroll, Wand2, UserCog, Loader2 } from 'lucide-react';
 import Topbar from '@/components/layout/Topbar';
+import { useQuery } from '@tanstack/react-query';
+import { getTeacherStats } from '@/services/teacherStatsService';
 
 export default function TeacherDashboard() {
-  const { user } = useAuthStore();
+  const { user, accessToken } = useAuthStore();
   const navigate = useNavigate();
+
+  const { data: stats, isLoading } = useQuery({
+    queryKey: ['teacherStats', user?.id],
+    queryFn: () => getTeacherStats(user!.id, accessToken!),
+    enabled: !!user?.id && !!accessToken && user?.role === 'teacher',
+    staleTime: 30000,
+  });
 
   const quickActions = [
     {
@@ -137,27 +146,33 @@ export default function TeacherDashboard() {
             <CardTitle className="text-2xl font-gaming text-white">RESUMEN DEL REINO</CardTitle>
           </CardHeader>
           <CardContent className="p-6">
-            <div className="grid gap-4 md:grid-cols-4">
-              {[
-                { label: 'Quizzes Forjados', value: '0', icon: Scroll, color: 'blue' },
-                { label: 'Batallas Activas', value: '0', icon: Play, color: 'green' },
-                { label: 'Aprendices', value: '0', icon: Users, color: 'purple' },
-                { label: 'Victoria Promedio', value: '0%', icon: Award, color: 'amber' },
-              ].map((stat, i) => {
-                const Icon = stat.icon;
-                return (
-                  <div key={i} className={`text-center p-4 bg-${stat.color}-950/30 rounded-xl border-2 border-${stat.color}-500/30`}>
-                    <Icon className={`w-10 h-10 mx-auto mb-3 text-${stat.color}-400`} />
-                    <p className={`text-xs font-gaming text-${stat.color}-300 mb-1`}>
-                      {stat.label}
-                    </p>
-                    <p className={`text-3xl font-gaming text-${stat.color}-400`}>
-                      {stat.value}
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
+            {isLoading ? (
+              <div className="text-center py-8">
+                <Loader2 className="w-10 h-10 text-indigo-400 animate-spin mx-auto" />
+              </div>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-4">
+                {[
+                  { label: 'Quizzes Forjados', value: stats?.totalQuizzes || 0, icon: Scroll, color: 'blue' },
+                  { label: 'Batallas Activas', value: stats?.activeGames || 0, icon: Play, color: 'green' },
+                  { label: 'Aprendices', value: stats?.totalStudents || 0, icon: Users, color: 'purple' },
+                  { label: 'Precisión Promedio', value: `${(stats?.averageAccuracy || 0).toFixed(1)}%`, icon: Award, color: 'amber' },
+                ].map((stat, i) => {
+                  const Icon = stat.icon;
+                  return (
+                    <div key={i} className={`text-center p-4 bg-${stat.color}-950/30 rounded-xl border-2 border-${stat.color}-500/30 hover:scale-105 transition-transform`}>
+                      <Icon className={`w-10 h-10 mx-auto mb-3 text-${stat.color}-400`} />
+                      <p className={`text-xs font-gaming text-${stat.color}-300 mb-1`}>
+                        {stat.label}
+                      </p>
+                      <p className={`text-3xl font-gaming text-${stat.color}-400`}>
+                        {typeof stat.value === 'number' ? stat.value.toLocaleString() : stat.value}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
       </motion.div>
@@ -177,15 +192,38 @@ export default function TeacherDashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-6">
-              <div className="text-center py-12">
-                <div className="w-20 h-20 mx-auto mb-4 bg-gradient-to-br from-blue-500/20 to-cyan-500/20 rounded-full flex items-center justify-center border-2 border-blue-500/30">
-                  <FileUp className="w-10 h-10 text-blue-400 opacity-50" />
+              {isLoading ? (
+                <div className="text-center py-8">
+                  <Loader2 className="w-8 h-8 text-blue-400 animate-spin mx-auto" />
                 </div>
-                <p className="text-sm font-gaming text-gray-400 mb-3">NO HAY PERGAMINOS</p>
-                <Button className="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 font-gaming">
-                  CREAR PRIMERO
-                </Button>
-              </div>
+              ) : stats?.recentQuizzes && stats.recentQuizzes.length > 0 ? (
+                <div className="space-y-3">
+                  {stats.recentQuizzes.map((quiz) => (
+                    <div key={quiz.set_id} className="p-4 bg-blue-950/30 rounded-lg border border-blue-500/30 hover:border-blue-400 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-gaming text-white">{quiz.title}</h4>
+                          <p className="text-xs text-blue-300">{quiz.question_count} preguntas • {quiz.times_played} veces jugado</p>
+                        </div>
+                        <BookOpen className="w-6 h-6 text-blue-400" />
+                      </div>
+                    </div>
+                  ))}
+                  <Button onClick={() => navigate('/question-sets')} className="w-full bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 font-gaming">
+                    VER TODOS
+                  </Button>
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <div className="w-20 h-20 mx-auto mb-4 bg-gradient-to-br from-blue-500/20 to-cyan-500/20 rounded-full flex items-center justify-center border-2 border-blue-500/30">
+                    <FileUp className="w-10 h-10 text-blue-400 opacity-50" />
+                  </div>
+                  <p className="text-sm font-gaming text-gray-400 mb-3">NO HAY PERGAMINOS</p>
+                  <Button onClick={() => navigate('/question-sets/create')} className="bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 font-gaming">
+                    CREAR PRIMERO
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         </motion.div>
@@ -204,18 +242,42 @@ export default function TeacherDashboard() {
               </CardTitle>
             </CardHeader>
             <CardContent className="p-6">
-              <div className="text-center py-12">
-                <div className="w-20 h-20 mx-auto mb-4 bg-gradient-to-br from-green-500/20 to-emerald-500/20 rounded-full flex items-center justify-center border-2 border-green-500/30">
-                  <Play className="w-10 h-10 text-green-400 opacity-50" />
+              {isLoading ? (
+                <div className="text-center py-8">
+                  <Loader2 className="w-8 h-8 text-green-400 animate-spin mx-auto" />
                 </div>
-                <p className="text-sm font-gaming text-gray-400 mb-3">SIN BATALLAS</p>
-                <Button 
-                  variant="outline" 
-                  className="border-2 border-green-500 hover:bg-green-500/10 text-green-400 font-gaming"
-                >
-                  INICIAR AHORA
-                </Button>
-              </div>
+              ) : stats?.recentGames && stats.recentGames.length > 0 ? (
+                <div className="space-y-3">
+                  {stats.recentGames.map((game) => (
+                    <div key={game.game_id} className="p-4 bg-green-950/30 rounded-lg border border-green-500/30 hover:border-green-400 transition-colors">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="font-gaming text-white">{game.game_code}</h4>
+                          <p className="text-xs text-green-300">{game.player_count} jugadores • {game.status}</p>
+                        </div>
+                        <Play className="w-6 h-6 text-green-400" />
+                      </div>
+                    </div>
+                  ))}
+                  <Button onClick={() => navigate('/game/create')} className="w-full bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 font-gaming">
+                    NUEVA BATALLA
+                  </Button>
+                </div>
+              ) : (
+                <div className="text-center py-12">
+                  <div className="w-20 h-20 mx-auto mb-4 bg-gradient-to-br from-green-500/20 to-emerald-500/20 rounded-full flex items-center justify-center border-2 border-green-500/30">
+                    <Play className="w-10 h-10 text-green-400 opacity-50" />
+                  </div>
+                  <p className="text-sm font-gaming text-gray-400 mb-3">SIN BATALLAS</p>
+                  <Button 
+                    onClick={() => navigate('/game/create')}
+                    variant="outline" 
+                    className="border-2 border-green-500 hover:bg-green-500/10 text-green-400 font-gaming"
+                  >
+                    INICIAR AHORA
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         </motion.div>

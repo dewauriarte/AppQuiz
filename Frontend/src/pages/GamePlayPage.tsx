@@ -1,7 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getSocket } from '@/lib/socket';
+import { useQueryClient } from '@tanstack/react-query';
+import { initializeSocket, getSocket } from '@/lib/socket';
 import { useAuthStore } from '@/store/authStore';
 import toast from 'react-hot-toast';
 import QuestionScreen from '@/components/game/QuestionScreen';
@@ -60,7 +61,8 @@ interface LeaderboardPlayer {
 export default function GamePlayPage() {
   const { gameCode } = useParams<{ gameCode: string }>();
   const navigate = useNavigate();
-  const { user, hasHydrated } = useAuthStore();
+  const queryClient = useQueryClient();
+  const { user, hasHydrated, accessToken } = useAuthStore();
 
   const [phase, setPhase] = useState<GamePhase>('waiting');
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
@@ -76,6 +78,8 @@ export default function GamePlayPage() {
   const [previousRank, setPreviousRank] = useState<number | undefined>(undefined);
   const questionResultsTimeoutRef = useRef<number | null>(null);
   const answerResultRef = useRef<AnswerResult | null>(null); // Ref para mantener el valor actual
+  const isInitializedRef = useRef<boolean>(false); // Para evitar setup múltiple (Strict Mode)
+  const currentGameCodeRef = useRef<string | null>(null); // Para detectar cambio real de juego
 
   // Verificar si es profesor: usar role como fallback, pero preferir teacher_id del juego
   const isTeacherByRole = user?.role === 'teacher';
@@ -83,87 +87,178 @@ export default function GamePlayPage() {
   const isTeacher = isTeacherById || isTeacherByRole;
 
   useEffect(() => {
-    const socket = getSocket();
-    if (!socket || !gameCode) return;
+    // ✅ CRÍTICO: Esperar a que se complete la hidratación antes de continuar
+    if (!hasHydrated) {
+      console.log('[GamePlayPage] ⏳ Esperando hidratación del authStore...');
+      return;
+    }
 
-    // Unirse al room del juego
-    socket.emit('game:join-room', { gameCode }, (response: any) => {
-      if (response.success) {
+    // ✅ CRÍTICO: Detectar si es un remontaje real (recarga F5) vs Strict Mode
+    if (currentGameCodeRef.current !== gameCode) {
+      // Es un juego diferente o recarga real, resetear
+      console.log('[GamePlayPage] 🔄 Nuevo montaje detectado (gameCode cambió o recarga)');
+      isInitializedRef.current = false;
+      currentGameCodeRef.current = gameCode || null;
+    }
+    
+    // Evitar setup múltiple en Strict Mode
+    if (isInitializedRef.current) {
+      console.log('[GamePlayPage] ⚠️ Setup ya completado (Strict Mode), saltando...');
+      return;
+    }
 
-        // Guardar game data
-        setGame(response.game);
+    console.log('[GamePlayPage] ✅ AuthStore hidratado, verificando datos...');
 
-        // Si el juego está en lobby, redirigir al lobby
-        if (response.gameStatus === 'lobby') {
-          navigate(`/game/lobby/${gameCode}`);
-          return;
+    if (!gameCode || !accessToken) {
+      console.warn('[GamePlayPage] ❌ Missing gameCode or accessToken');
+      navigate('/dashboard');
+      return;
+    }
+
+    if (!user) {
+      console.error('[GamePlayPage] ❌ User es null después de hidratación, redirigiendo a login');
+      navigate('/login');
+      return;
+    }
+
+    console.log('[GamePlayPage] ✅ Todo OK, inicializando socket para User ID:', user.id);
+
+    // Marcar como inicializado ANTES de cualquier operación asíncrona
+    isInitializedRef.current = true;
+
+    // ✅ CRÍTICO: Inicializar socket si no existe (necesario para reconexión al recargar)
+    const socket = initializeSocket(accessToken);
+
+    if (!socket || !gameCode) {
+      console.error('[GamePlayPage] ❌ Socket initialization failed');
+      isInitializedRef.current = false; // Reset si falla
+      navigate('/dashboard');
+      return;
+    }
+
+    // ✅ Esperar a que el socket esté conectado antes de hacer emit
+    const waitForConnection = () => {
+      return new Promise<void>((resolve) => {
+        if (socket.connected) {
+          resolve();
+        } else {
+          socket.once('connect', () => {
+            console.log('[GamePlayPage] ✅ Socket conectado');
+            resolve();
+          });
         }
+      });
+    };
 
-        // Si el juego ya terminó, mostrar resultados
-        if (response.gameStatus === 'finished') {
-          setPhase('finished');
-        }
+    // Setup del juego
+    const setupGame = async () => {
+      // Esperar a que el socket esté conectado
+      await waitForConnection();
 
-        // Inicializar totales para teacher
-        if (response.players) {
-          setTotalPlayers(response.players.length);
-        }
+      console.log('[GamePlayPage] 📡 Uniéndose al room del juego:', gameCode);
 
-        // **CRÍTICO PARA RECONEXIÓN**: Recuperar estado completo desde Redis
-        if (response.gameStatus === 'active' || response.gameStatus === 'starting') {
-          socket.emit('game:get-state', { gameCode }, (stateResponse: any) => {
-            if (stateResponse.success && stateResponse.state) {
-              const state = stateResponse.state;
+      // Unirse al room del juego
+      socket.emit('game:join-room', { gameCode }, (response: any) => {
+        if (response.success) {
+          console.log('[GamePlayPage] ✅ Unido al room del juego');
+          console.log('[GamePlayPage] Game Status:', response.gameStatus);
 
-              // Restaurar pregunta actual si existe
-              if (state.currentQuestion) {
+          // Guardar game data
+          setGame(response.game);
 
-                // El backend retorna el formato correcto directamente desde prepareQuestion
-                const questionData = {
-                  questionNumber: state.currentQuestion.questionNumber,
-                  totalQuestions: state.currentQuestion.totalQuestions,
-                  question: {
-                    question_id: state.currentQuestion.questionId,
-                    question_text: state.currentQuestion.questionText,
-                    question_type: state.currentQuestion.questionType,
-                    difficulty: 1,
-                    options: state.currentQuestion.options || [],
-                  },
-                  timeLimit: state.currentQuestion.timeLimit,
-                };
+          // Si el juego está en lobby, redirigir al lobby
+          if (response.gameStatus === 'lobby') {
+            console.log('[GamePlayPage] ⏪ Juego en lobby, redirigiendo...');
+            navigate(`/game/lobby/${gameCode}`);
+            return;
+          }
 
-                setCurrentQuestion(questionData);
-                setTimeRemaining(state.currentQuestion.timeLimit);
-                setPhase('question');
+          // Si el juego ya terminó, mostrar resultados
+          if (response.gameStatus === 'finished') {
+            console.log('[GamePlayPage] 🏁 Juego terminado');
+            setPhase('finished');
+          }
+
+          // Inicializar totales para teacher
+          if (response.players) {
+            setTotalPlayers(response.players.length);
+          }
+
+          // **CRÍTICO PARA RECONEXIÓN**: Recuperar estado completo desde Redis
+          if (response.gameStatus === 'active' || response.gameStatus === 'starting') {
+            console.log('[GamePlayPage] 🔄 Recuperando estado del juego desde Redis...');
+
+            socket.emit('game:get-state', { gameCode }, (stateResponse: any) => {
+              if (stateResponse.success && stateResponse.state) {
+                const state = stateResponse.state;
+                console.log('[GamePlayPage] ✅ Estado recuperado:', state);
+                console.log('[GamePlayPage] 🔍 gameSession:', state.gameSession);
+                console.log('[GamePlayPage] 🔍 currentQuestion en state:', state.currentQuestion);
+                console.log('[GamePlayPage] 🔍 currentQuestion en gameSession:', state.gameSession?.currentQuestion);
+
+                // Restaurar pregunta actual si existe (priorizar gameSession.currentQuestion)
+                const questionToRestore = state.currentQuestion || state.gameSession?.currentQuestion;
+                
+                if (questionToRestore) {
+                  console.log('[GamePlayPage] 📝 Restaurando pregunta:', questionToRestore.questionNumber);
+
+                  // El backend retorna el formato correcto directamente desde prepareQuestion
+                  const questionData = {
+                    questionNumber: questionToRestore.questionNumber,
+                    totalQuestions: questionToRestore.totalQuestions,
+                    question: {
+                      question_id: questionToRestore.questionId,
+                      question_text: questionToRestore.questionText,
+                      question_type: questionToRestore.questionType,
+                      difficulty: 1,
+                      options: questionToRestore.options || [],
+                    },
+                    timeLimit: questionToRestore.timeLimit,
+                  };
+
+                  setCurrentQuestion(questionData);
+                  // Usar el timeRemaining guardado en Redis (actualizado cada segundo por el backend)
+                  const restoredTime = questionToRestore.timeRemaining ?? questionToRestore.timeLimit;
+                  setTimeRemaining(restoredTime);
+                  setPhase('question');
+                  console.log('[GamePlayPage] ⏱️ Tiempo restaurado:', restoredTime, 'segundos');
+                } else {
+                  console.log('[GamePlayPage] ⏳ Sin pregunta activa, esperando...');
+                  setPhase('waiting');
+                }
+
+                // Restaurar leaderboard
+                if (state.leaderboard && state.leaderboard.length > 0) {
+                  console.log('[GamePlayPage] 🏆 Leaderboard restaurado:', state.leaderboard.length, 'jugadores');
+                  setLeaderboard(state.leaderboard);
+                }
+
+                // Restaurar total de jugadores
+                if (state.allPlayers) {
+                  setTotalPlayers(state.allPlayers.length);
+                }
+
+                toast.success('Estado del juego recuperado', { icon: '♻️', duration: 2000 });
               } else {
+                console.warn('[GamePlayPage] ⚠️ No se pudo recuperar el estado:', stateResponse);
+                toast.error('No se pudo recuperar el estado del juego');
                 setPhase('waiting');
               }
-
-              // Restaurar leaderboard
-              if (state.leaderboard && state.leaderboard.length > 0) {
-                setLeaderboard(state.leaderboard);
-              }
-
-              // Restaurar total de jugadores
-              if (state.allPlayers) {
-                setTotalPlayers(state.allPlayers.length);
-              }
-
-              toast.success('Estado del juego recuperado', { icon: '♻️', duration: 2000 });
-            } else {
-              console.warn('[GamePlayPage] ⚠️ No se pudo recuperar el estado:', stateResponse);
-              setPhase('waiting');
-            }
-          });
+            });
+          } else {
+            // Si no está activo, simplemente esperar
+            console.log('[GamePlayPage] ⏳ Juego no activo, esperando...');
+            setPhase('waiting');
+          }
         } else {
-          // Si no está activo, simplemente esperar
-          setPhase('waiting');
+          console.error('[GamePlayPage] ❌ Error al unirse al room:', response.message);
+          toast.error(response.message || 'Error al unirse al juego');
+          navigate('/dashboard');
         }
-      } else {
-        console.error('[GamePlayPage] ❌ Error al unirse al room:', response.message);
-        toast.error('Error al unirse al juego');
-      }
-    });
+      });
+    };
+
+    setupGame();
 
     // Escuchar countdown
     socket.on('game:countdown', (data: { count: number | string }) => {
@@ -206,6 +301,7 @@ export default function GamePlayPage() {
     });
 
     socket.on('timer:tick', (data: { timeRemaining: number }) => {
+      console.log('[GamePlayPage] ⏱️ timer:tick recibido:', data.timeRemaining);
       setTimeRemaining(data.timeRemaining);
     });
 
@@ -229,8 +325,8 @@ export default function GamePlayPage() {
 
       setLeaderboard(data.leaderboard);
 
-      // **PROFESOR**: Ir directo a intermediate-ranking
-      if (isTeacher) {
+      // **PROFESOR**: Ir directo a intermediate-ranking (usar role directamente)
+      if (user?.role === 'teacher') {
         setPhase('intermediate-ranking');
 
         // Después de 8s, volver a waiting (sincronizado con backend)
@@ -280,10 +376,38 @@ export default function GamePlayPage() {
       setTotalPlayers(data.leaderboard.length);
     });
 
+    // **NUEVO**: Escuchar cuando alguien se une (para actualizar contador)
+    socket.on('game:player-joined', (data: { players: any[]; totalPlayers: number }) => {
+      console.log('[GamePlayPage] 👋 Jugador se unió, total:', data.totalPlayers);
+      setTotalPlayers(data.totalPlayers || data.players?.length || 0);
+    });
+
+    // **NUEVO**: Escuchar cuando alguien sale (para actualizar contador)
+    socket.on('game:player-left', (data: { userId: number; username: string }) => {
+      console.log('[GamePlayPage] 👋 Jugador salió:', data.username);
+      // Decrementar total de jugadores
+      setTotalPlayers(prev => Math.max(0, prev - 1));
+    });
+
+    // **NUEVO**: Escuchar cuando alguien se desconecta (para actualizar contador)
+    socket.on('game:player-disconnected', (data: { userId: number; username: string }) => {
+      console.log('[GamePlayPage] ⚠️ Jugador desconectado:', data.username);
+      // NO decrementar contador inmediatamente - esperar a ver si reconecta
+      // Los jugadores que recargan se desconectan y reconectan rápidamente
+    });
+
+    // **NUEVO**: Escuchar cuando alguien se reconecta (después de recargar página)
+    socket.on('game:player-reconnected', (data: { userId: number; username: string; nickname: string }) => {
+      console.log('[GamePlayPage] ♻️ Jugador reconectado:', data.nickname);
+      toast.success(`${data.nickname} se reconectó`, { icon: '♻️', duration: 2000 });
+      // No es necesario incrementar contador - nunca lo decrementamos
+    });
+
     // **NUEVO**: Escuchar cuando alguien responde (para actualizar contador del profesor)
     socket.on('answer:received', () => {
       // Solo incrementar si es el profesor (para no duplicar contador en estudiantes)
-      if (isTeacher) {
+      // Usar user.role en lugar de isTeacher para evitar dependencias
+      if (user?.role === 'teacher') {
         setAnswersReceived(prev => prev + 1);
       }
     });
@@ -309,12 +433,19 @@ export default function GamePlayPage() {
     });
 
     return () => {
+      console.log('[GamePlayPage] 🧹 Cleaning up socket listeners');
+      // NO resetear isInitializedRef aquí para evitar re-setup en Strict Mode
+      // Solo se resetea si el gameCode realmente cambia
       socket.off('game:countdown');
       socket.off('question:new');
       socket.off('timer:tick');
       socket.off('question:timeout');
       socket.off('question:results');
       socket.off('leaderboard:update');
+      socket.off('game:player-joined');
+      socket.off('game:player-left');
+      socket.off('game:player-disconnected');
+      socket.off('game:player-reconnected');
       socket.off('answer:received');
       socket.off('game:finished');
       socket.off('game:error');
@@ -325,7 +456,17 @@ export default function GamePlayPage() {
         questionResultsTimeoutRef.current = null;
       }
     };
-  }, [gameCode, navigate, isTeacher]);
+    // ✅ CRÍTICO: Solo depender de valores que realmente cambian la conexión
+    // NO incluir isTeacher porque cambia cuando game cambia y causa loop
+  }, [gameCode, navigate, hasHydrated, accessToken, user]);
+
+  // ✅ Effect separado para resetear cuando el gameCode cambia
+  useEffect(() => {
+    return () => {
+      // Solo resetear cuando el gameCode realmente cambia (al navegar a otro juego)
+      isInitializedRef.current = false;
+    };
+  }, [gameCode]);
 
   const handleAnswerSubmit = (optionId: number) => {
     if (selectedOption !== null) {
@@ -391,6 +532,13 @@ export default function GamePlayPage() {
   };
 
   const handleContinue = () => {
+    // ✅ Invalidar caché de React Query para forzar refresh de stats
+    queryClient.invalidateQueries({ queryKey: ['userStats'] });
+    queryClient.invalidateQueries({ queryKey: ['userProfileStats'] });
+    queryClient.invalidateQueries({ queryKey: ['userRecentGames'] });
+    queryClient.invalidateQueries({ queryKey: ['globalLeaderboard'] });
+    queryClient.invalidateQueries({ queryKey: ['miniGlobalLeaderboard'] });
+    
     navigate('/dashboard');
   };
 

@@ -43,6 +43,7 @@ export interface GameSessionState {
   config: Prisma.JsonValue;
   createdAt: number;
   startedAt?: number;
+  currentQuestion?: any; // Pregunta actual preparada (para recuperación al recargar)
 }
 
 export interface PlayerState {

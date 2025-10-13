@@ -256,6 +256,8 @@ export function registerGameHandlers(io: Server): void {
 
           // **REDIS**: Crear estado inicial del jugador si no existe
           let playerState: PlayerState | null = await RedisGameSessionService.getPlayerState(gameCode, user.userId);
+          const wasDisconnected = playerState && !playerState.isConnected;
+          
           if (!playerState) {
             playerState = {
               userId: user.userId,
@@ -275,6 +277,16 @@ export function registerGameHandlers(io: Server): void {
           }
 
           console.log(`✅ Player ${user.userId} synced to Redis for game ${gameCode}`);
+
+          // Si el jugador estaba desconectado y el juego está activo, notificar reconexión
+          if (wasDisconnected && (game.status === GameStatus.active || game.status === GameStatus.starting)) {
+            console.log(`♻️ Player ${gamePlayer.nickname} reconnected to active game ${gameCode}`);
+            io.to(`game:${gameCode}`).emit('game:player-reconnected', {
+              userId: user.userId,
+              username: user.username,
+              nickname: gamePlayer.nickname,
+            });
+          }
         }
 
         // Obtener lista actualizada de jugadores
@@ -434,6 +446,12 @@ export function registerGameHandlers(io: Server): void {
               data: { status: GameStatus.active },
             });
             console.log(`[Game ${gameCode}] ✅ Estado cambiado a active en BD`);
+
+            // **CRÍTICO**: Actualizar status en Redis también
+            await RedisGameSessionService.updateGameSession(gameCode, {
+              status: GameStatus.active,
+            });
+            console.log(`[Game ${gameCode}] ✅ Estado cambiado a active en Redis`);
 
             // Notificar que el juego comenzó (para que naveguen a GamePlayPage)
             console.log(`[Game ${gameCode}] 📢 Emitiendo 'game:started'...`);
@@ -672,10 +690,20 @@ export function registerGameHandlers(io: Server): void {
           highest_combo: player.highestCombo,
         }));
 
-        // Si el juego está activo y hay una pregunta en curso, enviarla
+        // ✅ CRÍTICO: Si el juego está activo, recuperar pregunta actual desde Redis
+        // NO llamar a prepareQuestion() porque generaría una nueva pregunta
         let currentQuestion = null;
-        if (gameSession && gameSession.status === GameStatus.active) {
-          currentQuestion = await GameplayService.prepareQuestion(gameCode);
+        console.log(`[game:get-state] 🔍 gameSession exists:`, !!gameSession);
+        console.log(`[game:get-state] 🔍 gameSession.status:`, gameSession?.status);
+        console.log(`[game:get-state] 🔍 gameSession.currentQuestion exists:`, !!gameSession?.currentQuestion);
+        
+        if (gameSession && gameSession.status === GameStatus.active && gameSession.currentQuestion) {
+          currentQuestion = gameSession.currentQuestion; // Leer desde Redis
+          console.log(`♻️ Pregunta actual recuperada desde Redis: #${currentQuestion.questionNumber}`);
+        } else if (gameSession && gameSession.status === GameStatus.active) {
+          console.warn(`⚠️ Juego activo pero sin currentQuestion en Redis para ${gameCode}`);
+          console.warn(`⚠️ gameSession.currentQuestionIndex: ${gameSession.currentQuestionIndex}`);
+          console.warn(`⚠️ gameSession.totalQuestions: ${gameSession.totalQuestions}`);
         }
 
         callback({
@@ -731,9 +759,30 @@ async function sendQuestion(io: any, gameCode: string) {
     const timeLimit = questionData.timeLimit;
     let timeRemaining = timeLimit;
 
-    const timerInterval = setInterval(() => {
+    const timerInterval = setInterval(async () => {
       timeRemaining--;
+      
+      // Ver cuántos sockets están en el room
+      const socketsInRoom = io.sockets.adapter.rooms.get(`game:${gameCode}`);
+      const socketCount = socketsInRoom ? socketsInRoom.size : 0;
+      
       io.to(`game:${gameCode}`).emit('timer:tick', { timeRemaining });
+      console.log(`[Game ${gameCode}] ⏱️ Timer tick ${timeRemaining}s → ${socketCount} sockets en room`);
+
+      // ✅ Actualizar timeRemaining en Redis para reconexiones
+      try {
+        const session = await RedisGameSessionService.getGameSession(gameCode);
+        if (session?.currentQuestion) {
+          await RedisGameSessionService.updateGameSession(gameCode, {
+            currentQuestion: {
+              ...session.currentQuestion,
+              timeRemaining, // Añadir el tiempo restante actual
+            },
+          });
+        }
+      } catch (err) {
+        console.error(`Error updating timer in Redis for ${gameCode}:`, err);
+      }
 
       if (timeRemaining <= 0) {
         clearInterval(timerInterval);
@@ -812,9 +861,12 @@ async function showQuestionResults(io: any, gameCode: string) {
  */
 async function endGame(io: any, gameCode: string) {
   try {
+    console.log(`[endGame] 🏁 Finalizando juego ${gameCode}...`);
     const results = await GameplayService.endGame(gameCode);
+    console.log(`[endGame] ✅ Resultados obtenidos, jugadores: ${results.leaderboard.length}`);
 
     // **FIX**: Mapear de camelCase (backend) a snake_case (frontend)
+    // ✅ INCLUIR rewards y levelUp
     const mappedLeaderboard = results.leaderboard.map((player: any) => ({
       rank: player.rank,
       user_id: player.userId,
@@ -825,15 +877,22 @@ async function endGame(io: any, gameCode: string) {
       wrong_answers: player.wrongAnswers,
       combo_streak: player.comboStreak,
       highest_combo: player.highestCombo,
+      rewards: player.rewards, // ✅ Incluir rewards
+      levelUp: player.levelUp, // ✅ Incluir levelUp
     }));
 
+    console.log(`[endGame] 📤 Emitiendo game:finished con ${mappedLeaderboard.length} jugadores`);
+    console.log(`[endGame] 🎁 Recompensas del primer jugador:`, mappedLeaderboard[0]?.rewards);
+    
     io.to(`game:${gameCode}`).emit('game:finished', {
       leaderboard: mappedLeaderboard,
       totalPlayers: results.totalPlayers,
     });
 
+    console.log(`[endGame] ✅ Juego finalizado correctamente`);
+
   } catch (error) {
-    console.error('Error ending game:', error);
+    console.error('[endGame] ❌ Error ending game:', error);
     io.to(`game:${gameCode}`).emit('game:error', {
       message: 'Error al finalizar el juego',
     });

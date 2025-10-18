@@ -2,7 +2,7 @@ import { createServer } from 'http';
 import app from './app';
 import { env } from '@config/env';
 import prisma from '@config/database';
-import redis, { closeRedis } from '@config/redis';
+import { initRedis, closeRedis } from '@config/redis';
 import { initializeSocket } from '@config/socket';
 import { registerGameHandlers } from '@/socket/gameHandlers';
 import { registerSurvivalHandlers } from '@/socket/survivalHandlers';
@@ -16,12 +16,10 @@ const startServer = async () => {
     await prisma.$connect();
     console.info('✅ Database connected successfully');
 
-    // Test Redis connection
-    try {
-      await redis.ping();
-      console.info('✅ Redis connected successfully');
-    } catch (redisError) {
-      console.warn('⚠️ Redis connection failed, continuing without Redis cache');
+    // Initialize Redis connection (optional)
+    const redisConnected = await initRedis();
+    if (!redisConnected) {
+      console.warn('⚠️ Redis not available, continuing without Redis cache');
       console.warn('   Game sessions will not persist across server restarts');
     }
 

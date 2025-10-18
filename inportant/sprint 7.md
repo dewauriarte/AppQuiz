@@ -177,6 +177,14 @@
 * [ ] Purchase confetti (react-confetti)
 * [ ] Smooth transitions entre equipar items
 
+### **Testing Frontend**
+
+* [ ] Tests de compra flow
+* [ ] Tests de equipar items
+* [ ] Tests de filtros
+
+---
+
 ## ✅ Criterios de Aceptación
 
 * [ ] Usuario puede ver catálogo de items en shop
@@ -189,13 +197,5 @@
 * [ ] Avatar se actualiza visualmente al equipar
 * [ ] Animaciones son smooth y celebratorias
 * [ ] Validaciones funcionan (nivel, currency, stock)
-
-### **Testing Frontend**
-
-* [ ] Tests de compra flow
-* [ ] Tests de equipar items
-* [ ] Tests de filtros
-
----
 
 ---
